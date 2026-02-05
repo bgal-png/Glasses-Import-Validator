@@ -16,7 +16,6 @@ def clean_headers(df):
 # 2. Load Master File (Cached)
 @st.cache_data
 def load_master():
-    # Load as string to preserve data like '00123'
     df = pd.read_excel("master.xlsx", dtype=str)
     df = clean_headers(df)
     return df
@@ -50,13 +49,11 @@ if uploaded_file:
         id_col = st.selectbox("Which column contains the Unique ID?", master_df.columns)
     with col2:
         # Slider for Fuzzy Matching
-        threshold = st.slider("Fuzzy Match Threshold (0-100)", min_value=50, max_value=100, value=85, help="Lower values allow more typos.")
+        threshold = st.slider("Fuzzy Match Threshold (0-100)", min_value=50, max_value=100, value=85)
 
-    # --- NEW: IGNORE COLUMNS SECTION ---
-    # These are the defaults you requested
+    # --- IGNORE COLUMNS SECTION ---
     default_ignore = ["Glasses name", "Meta description", "XML description", "Glasses model", "Glasses color code"]
-    
-    # Filter out defaults that don't actually exist in the file to avoid errors
+    # Only keep defaults that actually exist in the uploaded file
     valid_defaults = [c for c in default_ignore if c in user_df.columns]
     
     ignore_cols = st.multiselect(
@@ -75,8 +72,17 @@ if uploaded_file:
         
         st.write("Checking... please wait.")
         
+        # DEBUG: Show user what is being ignored
+        if ignore_cols:
+            st.caption(f"🙈 Ignoring these columns: {', '.join(ignore_cols)}")
+
         mistakes = []
         master_indexed = master_df.set_index(id_col)
+        
+        # --- ROBUST LOGIC CHANGE ---
+        # Create a specific list of columns to check right now. 
+        # We exclude the ID column and any Ignored columns immediately.
+        columns_to_check = [c for c in user_df.columns if c != id_col and c not in ignore_cols]
         
         for index, user_row in user_df.iterrows():
             user_id = user_row[id_col]
@@ -98,12 +104,10 @@ if uploaded_file:
             if isinstance(master_row, pd.DataFrame):
                 master_row = master_row.iloc[0]
 
-            # Compare columns
-            for column in user_df.columns:
-                # SKIP THE ID COLUMN AND IGNORED COLUMNS
-                if column == id_col or column in ignore_cols:
-                    continue 
+            # Compare ONLY the allowed columns
+            for column in columns_to_check:
                 
+                # Check if column exists in Master to compare
                 if column in master_df.columns:
                     val_user = str(user_row[column]).strip()
                     val_master = str(master_row[column]).strip()
@@ -153,8 +157,7 @@ if uploaded_file:
             results_df = results_df.sort_values(by=["Error Type", "Row #"])
             st.dataframe(results_df, use_container_width=True)
             
-            # --- DOWNLOAD BUTTON ---
-            # Create an in-memory buffer for the Excel file
+            # Download Button
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                 results_df.to_excel(writer, index=False, sheet_name='Mistakes')
