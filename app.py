@@ -1,9 +1,10 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
+from thefuzz import fuzz # New library for fuzzy matching
 
 # 1. Page Configuration
 st.set_page_config(page_title="Excel Spellchecker", layout="wide")
-st.title("My Excel Spellchecker")
+st.title("My Excel Spellchecker (Fuzzy + Case Sensitive)")
 
 # --- HELPER FUNCTION TO CLEAN HEADERS ---
 def clean_headers(df):
@@ -16,7 +17,6 @@ def clean_headers(df):
 def load_master():
     # Load as string to preserve data like '00123'
     df = pd.read_excel("master.xlsx", dtype=str)
-    # CLEAN THE HEADERS IMMEDIATELY
     df = clean_headers(df)
     return df
 
@@ -43,14 +43,19 @@ if uploaded_file:
     st.divider()
     st.subheader("2. Settings")
     
-    # Select ID Column from Master headers
-    id_col = st.selectbox("Which column contains the Unique ID?", master_df.columns)
+    col1, col2 = st.columns(2)
+    with col1:
+        # Select ID Column from Master headers
+        id_col = st.selectbox("Which column contains the Unique ID?", master_df.columns)
+    with col2:
+        # Slider for Fuzzy Matching Strictness
+        threshold = st.slider("Fuzzy Match Threshold (0-100)", min_value=50, max_value=100, value=85, help="Lower values allow more typos. Higher values require closer matches.")
 
     # --- SAFETY CHECK: Does this column exist in the User file? ---
     if id_col not in user_df.columns:
         st.error(f"⚠️ Error: The column '{id_col}' exists in the Master file but NOT in your uploaded file.")
         st.warning(f"Your uploaded columns are: {list(user_df.columns)}")
-        st.stop() # Stop here, don't run the rest of the code
+        st.stop()
     
     # Button to trigger check
     if st.button("Run Spellcheck Comparison"):
@@ -60,8 +65,7 @@ if uploaded_file:
         # --- THE COMPARISON LOGIC ---
         mistakes = []
         
-        # Optimize: Set ID as index for faster lookups (replaces the slow loop)
-        # We create copies so we don't mess up the original display data
+        # Optimize: Set ID as index for faster lookups
         master_indexed = master_df.set_index(id_col)
         
         # Loop through User file
@@ -74,7 +78,9 @@ if uploaded_file:
                     "Row #": index + 2,
                     "ID": user_id,
                     "Column": "ID Check",
-                    "Issue": "This ID does not exist in the Master file."
+                    "Error Type": "ID Missing",
+                    "Your Value": user_id,
+                    "Master Value": "Not Found"
                 })
                 continue 
 
@@ -95,11 +101,45 @@ if uploaded_file:
                     val_user = str(user_row[column]).strip()
                     val_master = str(master_row[column]).strip()
                     
-                    if val_user != val_master:
+                    # --- NEW LOGIC: TIERED CHECKING ---
+                    
+                    # 1. Exact Match? (Fastest check)
+                    if val_user == val_master:
+                        continue # It's perfect, move to next column
+
+                    # 2. Case Sensitivity Check
+                    if val_user.lower() == val_master.lower():
                         mistakes.append({
                             "Row #": index + 2,
                             "ID": user_id,
                             "Column": column,
+                            "Error Type": "Case Mismatch",
+                            "Your Value": val_user,
+                            "Master Value": val_master
+                        })
+                        continue
+
+                    # 3. Fuzzy Match Check
+                    # We calculate how similar they are (0 to 100)
+                    match_score = fuzz.ratio(val_user.lower(), val_master.lower())
+                    
+                    if match_score >= threshold:
+                        mistakes.append({
+                            "Row #": index + 2,
+                            "ID": user_id,
+                            "Column": column,
+                            "Error Type": f"Typo ({match_score}%)", # Shows similarity score
+                            "Your Value": val_user,
+                            "Master Value": val_master
+                        })
+                    
+                    # 4. Complete Mismatch (Score is below threshold)
+                    else:
+                        mistakes.append({
+                            "Row #": index + 2,
+                            "ID": user_id,
+                            "Column": column,
+                            "Error Type": "Wrong Value",
                             "Your Value": val_user,
                             "Master Value": val_master
                         })
@@ -108,6 +148,10 @@ if uploaded_file:
         if mistakes:
             st.error(f"Found {len(mistakes)} discrepancies!")
             results_df = pd.DataFrame(mistakes)
+            
+            # Sort so 'Wrong Value' and 'Typo' are grouped nicely
+            results_df = results_df.sort_values(by=["Error Type", "Row #"])
+            
             st.dataframe(results_df, use_container_width=True)
         else:
             st.balloons()
