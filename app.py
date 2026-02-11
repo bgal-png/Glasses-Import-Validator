@@ -8,6 +8,8 @@ st.set_page_config(page_title="Excel Validator v2", layout="wide")
 st.title("Excel Validator: Glasses Edition 👓")
 
 # --- COLUMN MAPPING CONFIGURATION ---
+# Key = Master File Column Name (Corrected)
+# Value = User File Column Name
 COLUMN_MAPPING = {
     "Glasses type": "Glasses type",
     "Manufacturer": "Manufacturer",
@@ -22,7 +24,7 @@ COLUMN_MAPPING = {
     "Glasses frame color": "Frame Colour",
     "Glasses temple color": "Temple Colour",
     "Glasses main material": "Glasses main material",
-    "Glasses lens color": "Glasses lens Colour",
+    "Glasses lens color": "Glasses lens Colour",          # <--- FIXED
     "Glasses lens material": "Glasses lens material",
     "Glasses lens effect": "Glasses lens effect",
     "Sunglasses filter": "Sunglasses filter",
@@ -33,11 +35,11 @@ COLUMN_MAPPING = {
     "Items type": "Items type",
     "Items packing": "Items packing",
     "Glasses contain": "Glasses contain",
-    "Sport glasses": "Sports Glasses",
+    "Sport glasses": "Sports Glasses",                    # <--- FIXED
     "Glasses frame color effect": "Glasses frame color effect",
     "Glasses other features": "Glasses other features",
     "SunGlasses RX lenses": "SunGlasses RX lenses",
-    "Glasses clip-on lens color": "Glasses clip-on lens colour",
+    "Glasses clip-on lens color": "Glasses clip-on lens colour", # <--- FIXED
     "Brand": "Brand",
     "Producing company": "Producing company",
     "Glasses for your face shape": "Glasses for your face shape",
@@ -65,11 +67,12 @@ def load_master():
     
     # 2. Try loading as Excel (Standard)
     try:
+        # engine='openpyxl' helps with compatibility
         df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
     except Exception as e_excel:
         # 3. If that fails, try loading as CSV (Backup)
         try:
-            # engine='python' allows auto-detection of separators (comma vs semicolon)
+            # engine='python' allows auto-detection of separators
             df = pd.read_csv(file_path, dtype=str, sep=None, engine='python')
             st.warning("⚠️ Note: 'master.xlsx' appears to be a CSV file, not a real Excel file. I loaded it anyway!")
         except Exception as e_csv:
