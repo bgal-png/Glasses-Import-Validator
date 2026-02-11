@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import os
 from difflib import get_close_matches
 
 # 1. Page Configuration
@@ -46,29 +47,62 @@ COLUMN_MAPPING = {
 # --- HELPER FUNCTIONS ---
 @st.cache_data
 def load_master():
-    try:
-        df = pd.read_excel("master.xlsx", dtype=str, engine='openpyxl')
-        df.columns = df.columns.str.strip() # Remove invisible spaces
+    """
+    Robust loader that handles XLSX, CSV, and renamed files.
+    """
+    file_path = "master.xlsx"
+    
+    # 1. Check if file exists and isn't empty
+    if not os.path.exists(file_path):
+        st.error("❌ 'master.xlsx' was not found in the GitHub folder.")
+        st.stop()
         
-        if "Items type" in df.columns:
-            df = df[df["Items type"] == "Glasses"]
-            return df
-        else:
-            st.error("❌ Critical Error: 'Items type' column not found in Master File.")
+    if os.path.getsize(file_path) == 0:
+        st.error("❌ 'master.xlsx' exists but is empty (0 bytes). Please re-upload it.")
+        st.stop()
+
+    df = None
+    
+    # 2. Try loading as Excel (Standard)
+    try:
+        df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
+    except Exception as e_excel:
+        # 3. If that fails, try loading as CSV (Backup)
+        try:
+            # engine='python' allows auto-detection of separators (comma vs semicolon)
+            df = pd.read_csv(file_path, dtype=str, sep=None, engine='python')
+            st.warning("⚠️ Note: 'master.xlsx' appears to be a CSV file, not a real Excel file. I loaded it anyway!")
+        except Exception as e_csv:
+            st.error("❌ FATAL ERROR: Could not load the file as Excel OR CSV.")
+            st.write(f"Excel Error: {e_excel}")
+            st.write(f"CSV Error: {e_csv}")
             st.stop()
             
-    except Exception as e:
-        st.error(f"❌ Error loading master.xlsx: {e}")
+    # 4. Clean and Filter
+    # Clean headers (strip hidden spaces)
+    df.columns = df.columns.str.strip()
+    
+    # Filter for 'Glasses' only (Column V in Excel, 'Items type' here)
+    if "Items type" in df.columns:
+        df = df[df["Items type"] == "Glasses"]
+        return df
+    else:
+        st.error("❌ Critical Error: 'Items type' column not found in Master File.")
         st.stop()
 
 def clean_user_file(file):
-    df = pd.read_excel(file, dtype=str, engine='openpyxl')
+    try:
+        df = pd.read_excel(file, dtype=str)
+    except:
+        file.seek(0)
+        df = pd.read_csv(file, dtype=str, sep=None, engine='python')
+        
     df.columns = df.columns.str.strip()
     return df
 
-# 2. LOAD MASTER
+# 2. LOAD MASTER DATA
 master_df = load_master()
-st.success(f"✅ Master File Loaded ({len(master_df)} rows).")
+st.success(f"✅ Master File Loaded Successfully ({len(master_df)} rows of 'Glasses').")
 
 # 3. UPLOAD USER FILE
 st.divider()
@@ -106,16 +140,14 @@ if uploaded_file:
                 st.write(f"**For '{missing}', did you mean:**")
                 for match in matches:
                     st.code(match)
-            else:
-                st.write(f"Could not find anything similar to '{missing}'")
-        
         st.stop()
         
     if missing_user:
         st.error(f"❌ CRITICAL: Your Uploaded File is missing these columns: {missing_user}")
         st.stop()
         
-    st.success("✅ Structure Validated! All required columns exist.")
+    st.success("✅ Structure Validated! All required columns exist in both files.")
     
+    # Placeholder for validation logic
     if st.button("Start Validation"):
-        st.write("Validation logic coming next...")
+        st.write("Validation logic is ready to be added next...")
