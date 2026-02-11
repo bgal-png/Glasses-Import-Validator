@@ -48,61 +48,44 @@ COLUMN_MAPPING = {
 @st.cache_data
 def load_master():
     """
-    Indestructible Loader: Tries every possible method to read the file.
+    Robust Loader: Targets 'master_clean.xlsx' first.
     """
-    file_path = "master.xlsx"
+    # UPDATED FILENAME HERE
+    file_path = "master_clean.xlsx"
+    
     if not os.path.exists(file_path):
-        st.error("❌ 'master.xlsx' NOT FOUND in the directory.")
+        st.error(f"❌ '{file_path}' NOT FOUND in the directory.")
         st.stop()
         
     df = None
     debug_logs = []
 
-    # Method 1: Standard Excel (openpyxl)
+    # Method 1: Standard Excel (openpyxl) - This should work for your new clean file
     try:
         df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
     except Exception as e:
         debug_logs.append(f"OpenPyXL failed: {e}")
 
-    # Method 2: Old Excel (xlrd - for .xls renamed as .xlsx)
+    # Method 2: Fallbacks (Just in case)
     if df is None:
         try:
             df = pd.read_excel(file_path, dtype=str, engine='xlrd')
-        except Exception as e:
-            debug_logs.append(f"XLRD failed: {e}")
-
-    # Method 3: CSV (UTF-8)
-    if df is None:
-        try:
-            df = pd.read_csv(file_path, dtype=str, sep=None, engine='python', encoding='utf-8')
-        except Exception as e:
-            debug_logs.append(f"CSV (UTF-8) failed: {e}")
-
-    # Method 4: CSV (Windows-1252 / Latin1)
-    if df is None:
-        try:
-            df = pd.read_csv(file_path, dtype=str, sep=None, engine='python', encoding='cp1252')
-        except Exception as e:
-            debug_logs.append(f"CSV (CP1252) failed: {e}")
-
-    # Method 5: CSV (ISO-8859-1)
-    if df is None:
-        try:
-            df = pd.read_csv(file_path, dtype=str, sep=None, engine='python', encoding='iso-8859-1')
-        except Exception as e:
-            debug_logs.append(f"CSV (ISO) failed: {e}")
+        except Exception:
+            try:
+                df = pd.read_csv(file_path, dtype=str, sep=None, engine='python', encoding='utf-8')
+            except Exception:
+                pass
 
     # --- FINAL CHECK ---
     if df is None:
-        st.error("❌ FATAL ERROR: All loading methods failed.")
+        st.error("❌ FATAL ERROR: Could not load the Master file.")
         with st.expander("👀 View Technical Errors"):
             for log in debug_logs:
                 st.write(log)
         st.stop()
 
     # --- CLEANING ---
-    # 1. Strip whitespace from headers
-    # 2. Flatten newlines (Replace \n with space)
+    # Flatten newlines (Replace \n with space) and strip whitespace
     df.columns = df.columns.astype(str).str.replace(r'\n', ' ', regex=True).str.strip()
     
     # Filter for 'Glasses' (Column V / Items type)
@@ -147,9 +130,11 @@ if uploaded_file:
     missing_user = [col for col in COLUMN_MAPPING.values() if col not in user_df.columns]
 
     if missing_master:
-        st.error(f"❌ CRITICAL: Master File is missing: {missing_master}"); st.stop()
+        st.error(f"❌ CRITICAL: Master File is missing: {missing_master}")
+        st.stop()
     if missing_user:
-        st.error(f"❌ CRITICAL: User File is missing: {missing_user}"); st.stop()
+        st.error(f"❌ CRITICAL: User File is missing: {missing_user}")
+        st.stop()
 
     st.success("✅ Structure Validated!")
 
