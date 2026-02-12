@@ -9,18 +9,11 @@ st.title("Excel Validator: Glasses Edition 👓")
 
 # ==========================================
 # 🔒 LOCKED: MAIN MASTER LOADER (Tab 1)
-# RESTORED: The "Indestructible" Version
 # ==========================================
 @st.cache_data
 def load_master():
-    """
-    TRULY INDESTRUCTIBLE LOADER
-    1. Tries Excel (.xlsx)
-    2. If that fails, tries CSV with Auto-Separator.
-    3. If that fails, tries CSV with comma/semicolon explicitly.
-    """
+    """TRULY INDESTRUCTIBLE LOADER for Main Data"""
     current_dir = os.getcwd()
-    # Exclude 'name_master' so we don't accidentally load the wrong file here
     candidates = [f for f in os.listdir(current_dir) if (f.endswith('.xlsx') or f.endswith('.csv')) and "mistakes" not in f and "name_master" not in f and not f.startswith('~$')]
     
     if not candidates:
@@ -29,96 +22,105 @@ def load_master():
     file_path = candidates[0]
     df = None
     
-    # ATTEMPT 1: EXCEL (Standard)
+    # ATTEMPT 1: EXCEL
     try:
         df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
     except Exception:
-        # ATTEMPT 2: CSV (Fallback loop)
+        # ATTEMPT 2: CSV
         strategies = [
-            {'sep': None, 'engine': 'python'}, # Auto-detect
-            {'sep': ',', 'engine': 'c'},       # Standard Comma
-            {'sep': ';', 'engine': 'c'},       # Semicolon
-            {'sep': '\t', 'engine': 'c'}       # Tab
+            {'sep': None, 'engine': 'python'}, 
+            {'sep': ',', 'engine': 'c'}, 
+            {'sep': ';', 'engine': 'c'}, 
+            {'sep': '\t', 'engine': 'c'}
         ]
-        
         for enc in ['utf-8', 'cp1252', 'latin1']:
             for strat in strategies:
                 try:
-                    df = pd.read_csv(
-                        file_path, 
-                        dtype=str, 
-                        encoding=enc, 
-                        on_bad_lines='skip', 
-                        **strat
-                    )
-                    st.toast(f"ℹ️ Loaded '{file_path}' as CSV (Encoding: {enc})", icon="⚠️")
+                    df = pd.read_csv(file_path, dtype=str, encoding=enc, on_bad_lines='skip', **strat)
+                    st.toast(f"ℹ️ Loaded '{file_path}' as CSV (Fallback).", icon="ℹ️")
                     break
-                except:
-                    continue
-            if df is not None:
-                break
+                except: continue
+            if df is not None: break
     
     if df is None:
         st.error(f"❌ Could not read '{file_path}'. Tried Excel and all CSV formats.")
         st.stop()
 
-    # Clean headers
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
-    
-    # Filter for 'Glasses'
     target_col = next((c for c in df.columns if "Items type" in c), None)
+    
     if target_col:
         return df[df[target_col] == "Glasses"]
     else:
         st.error("❌ 'Items type' column missing in Master File."); st.stop()
 
 # ==========================================
-# 🔒 LOCKED: NAME MASTER LOADER (Tab 3)
-# New Logic for Syntax Checker
+# ⚡ SURGICAL LOADER: NAME MASTER (Tab 3)
+# optimized for speed & memory
 # ==========================================
 @st.cache_data
 def load_name_master():
     """
-    Loads 'name_master_clean.xlsx'.
-    Uses the same INDESTRUCTIBLE logic to ensure it loads.
+    SURGICAL LOADER.
+    Only loads columns 'name' and 'name_private'.
+    Ignores everything else to run fast.
     """
     target_filename = "name_master_clean.xlsx"
     
-    # Check if file exists
     if not os.path.exists(target_filename):
-        # Flexible search just in case
         candidates = [f for f in os.listdir('.') if "name_master" in f and not f.startswith('~$')]
         if not candidates: return None
         target_filename = candidates[0]
 
     df = None
-    
-    # ATTEMPT 1: EXCEL
+
+    # DEFINING THE FILTER:
+    # We use a lambda function to tell Pandas WHICH columns to keep.
+    # This prevents loading the other 40+ columns into RAM.
+    def column_filter(col_name):
+        if not isinstance(col_name, str): return False
+        c = col_name.strip().lower()
+        # We only want 'name' (exact) or 'name_private' (contains)
+        return c == "name" or "name_private" in c
+
+    # ATTEMPT 1: EXCEL (With Column Filter)
     try:
-        df = pd.read_excel(target_filename, dtype=str, engine='openpyxl')
+        df = pd.read_excel(
+            target_filename, 
+            dtype=str, 
+            engine='openpyxl',
+            usecols=column_filter # <--- This makes it "Surgical"
+        )
     except Exception:
-        # ATTEMPT 2: CSV
+        # ATTEMPT 2: CSV (With Column Filter)
         strategies = [{'sep': None, 'engine': 'python'}, {'sep': ',', 'engine': 'c'}, {'sep': ';', 'engine': 'c'}]
         for enc in ['utf-8', 'cp1252', 'latin1']:
             for strat in strategies:
                 try:
-                    df = pd.read_csv(target_filename, dtype=str, encoding=enc, on_bad_lines='skip', **strat)
+                    df = pd.read_csv(
+                        target_filename, 
+                        dtype=str, 
+                        encoding=enc, 
+                        on_bad_lines='skip', 
+                        usecols=column_filter, # <--- "Surgical" here too
+                        **strat
+                    )
                     break
                 except: continue
             if df is not None: break
 
-    if df is None: return None # Return None instead of crashing
+    if df is None: return None
 
     # Clean Headers
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
-    # 1. FILTER: Column 'name_private' (AL) must contain "glasses"
+    # 1. FILTER: Column 'name_private' must contain "glasses"
     private_col = next((c for c in df.columns if "name_private" in c), None)
     if not private_col: return None
         
     filtered_df = df[df[private_col].str.contains("glasses", case=False, na=False)]
     
-    # 2. TARGET: Column 'name' (C)
+    # 2. TARGET: Column 'name'
     name_col = next((c for c in df.columns if "name" == c or "name" == c.strip()), None)
     if not name_col: return None
          
@@ -134,7 +136,6 @@ def clean_user_file(file):
     return df
 
 def get_skeleton(text):
-    """Generates a shape mask: 'Ray-Ban' -> 'Aaa-Aaa'"""
     if not isinstance(text, str): return ""
     skeleton = ""
     for char in text:
@@ -149,8 +150,9 @@ def get_skeleton(text):
 # ==========================================
 
 # LOAD DATA
-master_df = load_master() # Uses the ORIGINAL Indestructible Loader
-name_master_list = load_name_master() # Uses the New Indestructible Name Loader
+with st.spinner("Loading Databases..."):
+    master_df = load_master() 
+    name_master_list = load_name_master()
 
 st.success(f"✅ Main Master Loaded ({len(master_df)} rows).")
 
@@ -168,7 +170,6 @@ if uploaded_file:
     user_df = clean_user_file(uploaded_file)
     st.info(f"User file loaded: {len(user_df)} rows.")
 
-    # TABS
     tab1, tab2, tab3 = st.tabs(["📊 Data Validation", "🖼️ Image Checker", "🧬 Syntax & Duplicates"])
 
     # ------------------------------------------
@@ -239,7 +240,6 @@ if uploaded_file:
                     raw_val = str(row[u_col])
                     if raw_val.lower() in ['nan', '', 'none']: continue
                     
-                    # Whitespace
                     ws_issues = []
                     if raw_val.startswith(" "): ws_issues.append("Leading Space")
                     if raw_val.endswith(" "): ws_issues.append("Trailing Space")
@@ -248,7 +248,6 @@ if uploaded_file:
                     for ws in ws_issues:
                         mistakes.append({"Row": idx+2, "Column": u_col, "Error": "Whitespace", "Value": ws, "Content": raw_val})
 
-                    # Content
                     clean_val = raw_val.strip()
                     parts = [v.strip() for v in clean_val.split('|')]
                     for p in parts:
@@ -333,6 +332,5 @@ if uploaded_file:
                 if report:
                     st.error(f"Found {len(report)} Issues!")
                     res_df = pd.DataFrame(report)
-                    # UPDATED STYLING: Added 'color: black;' for readability
                     st.dataframe(res_df.style.applymap(lambda x: 'background-color: #ffcccc; color: black;' if x == "❌ DUPLICATE" else 'background-color: #fff4cc; color: black;', subset=['Issue']), use_container_width=True)
                 else: st.balloons(); st.success("✅ Perfect! No duplicates and all syntax patterns look familiar.")
