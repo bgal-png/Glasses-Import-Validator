@@ -10,6 +10,7 @@ st.title("Excel Validator: Glasses Edition 👓")
 # --- HELPER: ROBUST LOADER ---
 @st.cache_data
 def load_master():
+    """Scans for master file, handles CSV/Excel, splits commas."""
     current_dir = os.getcwd()
     candidates = [f for f in os.listdir(current_dir) if (f.endswith('.xlsx') or f.endswith('.csv')) and "mistakes" not in f and not f.startswith('~$')]
     
@@ -41,13 +42,15 @@ def load_master():
     else:
         st.error("❌ 'Items type' missing in Master."); st.stop()
 
-def clean_user_file(file, header_row=0):
+def clean_user_file(file):
+    """Loads user file, assumes Header is Row 0."""
     try:
-        df = pd.read_excel(file, dtype=str, header=header_row)
+        df = pd.read_excel(file, dtype=str, header=0)
     except:
         file.seek(0)
-        df = pd.read_csv(file, dtype=str, sep=None, engine='python', header=header_row)
+        df = pd.read_csv(file, dtype=str, sep=None, engine='python', header=0)
     
+    # Clean headers (remove extra spaces/newlines)
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
     return df
 
@@ -58,19 +61,13 @@ st.success(f"✅ Master File Loaded ({len(master_df)} rows).")
 # 3. UPLOAD SECTION
 st.divider()
 st.subheader("1. Upload User File")
-
-col_upload, col_settings = st.columns([2, 1])
-with col_settings:
-    header_row_idx = st.number_input("Header Row Number", min_value=0, max_value=10, value=0)
-with col_upload:
-    uploaded_file = st.file_uploader("Choose Excel File", type=['xlsx'])
+uploaded_file = st.file_uploader("Choose Excel File", type=['xlsx'])
 
 if uploaded_file:
-    user_df = clean_user_file(uploaded_file, header_row=header_row_idx)
+    user_df = clean_user_file(uploaded_file)
     st.info(f"User file loaded: {len(user_df)} rows.")
 
     # 4. AUTO-MAPPING
-    # Define ideal pairs (Partial User Name -> Partial Master Name)
     IDEAL_PAIRS = {
         "Glasses type": "Glasses type ID",
         "Manufacturer": "Manufacturer ID",
@@ -111,36 +108,29 @@ if uploaded_file:
     user_cols = list(user_df.columns)
     master_cols = list(master_df.columns)
     
-    st.write("---")
-    st.subheader("🔗 Column Mapping")
-    
     for master_key, partial_user_key in IDEAL_PAIRS.items():
-        # Find Master Column containing the name
+        # Find Master Column
         real_master_col = next((c for c in master_cols if master_key in c), None)
-        # Find User Column containing the partial name
+        # Find User Column
         real_user_col = next((c for c in user_cols if partial_user_key in c), None)
         
         if real_master_col and real_user_col:
             active_map[real_master_col] = real_user_col
             
-    st.success(f"✅ Successfully mapped {len(active_map)} columns.")
+    st.write(f"🔗 Mapped **{len(active_map)}** columns automatically.")
 
     # 5. VALIDATION LOGIC
-    if st.button("🚀 Run Validation"):
+    if st.button("🚀 Run Validation", type="primary"):
         mistakes = []
         st.write("Checking data... please wait.")
         
         # --- A. PREPARE MASTER DATA (Explode Commas) ---
         valid_values = {}
         for m_col in active_map.keys():
-            # Get all text, drop NAs
             raw_series = master_df[m_col].dropna().astype(str)
-            
-            # Split by comma (handles multiple commas like ",,,")
-            # Explode creates a new row for every split value
+            # Split by comma (handles "Black, White")
             exploded = raw_series.str.split(r',+').explode()
             
-            # Clean: strip whitespace, lowercase, remove empties
             clean_set = set(exploded.str.strip().str.lower())
             if "" in clean_set: clean_set.remove("")
             
@@ -155,23 +145,19 @@ if uploaded_file:
             
             for m_col, u_col in active_map.items():
                 raw_cell_value = str(row[u_col]).strip()
-                
-                # Skip empty cells
                 if raw_cell_value.lower() in ['nan', '', 'none']: continue
                 
-                # 1. SPLIT USER VALUE BY PIPE '|'
-                # "Value A|Value B" -> ["Value A", "Value B"]
+                # Split User Value by Pipe '|'
                 user_values = [v.strip() for v in raw_cell_value.split('|')]
                 
-                # 2. CHECK EACH VALUE
                 for val in user_values:
-                    if not val: continue # Skip empty splits
+                    if not val: continue
                     
                     if val.lower() not in valid_values[m_col]:
                         mistakes.append({
-                            "Row #": index + 2 + header_row_idx,
+                            "Row": index + 2, # +2 for header and 0-index
                             "Column": u_col,
-                            "Invalid Value": val, # Show the specific part that failed
+                            "Invalid Value": val,
                             "Full Cell Content": raw_cell_value,
                             "Allowed (Example)": list(valid_values[m_col])[:3]
                         })
