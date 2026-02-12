@@ -10,7 +10,10 @@ st.title("Excel Validator: Glasses Edition 👓")
 # --- HELPER: ROBUST LOADER ---
 @st.cache_data
 def load_master():
-    """Scans for master file, handles CSV/Excel, splits commas."""
+    """
+    Scans for master file. Tries Excel first. 
+    If that fails (e.g. it's a CSV named .xlsx), switches to CSV mode automatically.
+    """
     current_dir = os.getcwd()
     candidates = [f for f in os.listdir(current_dir) if (f.endswith('.xlsx') or f.endswith('.csv')) and "mistakes" not in f and not f.startswith('~$')]
     
@@ -20,19 +23,25 @@ def load_master():
     file_path = candidates[0]
     df = None
     
+    # ATTEMPT 1: EXCEL
     try:
-        if file_path.endswith('.csv'):
-            for enc in ['utf-8', 'cp1252', 'latin1']:
-                try: df = pd.read_csv(file_path, dtype=str, sep=None, engine='python', encoding=enc); break
-                except: continue
-        else:
-            df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
-    except Exception as e:
-        st.error(f"❌ Failed to load '{file_path}': {e}"); st.stop()
-        
-    if df is None: st.error("❌ Could not read file."); st.stop()
+        df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
+    except Exception:
+        # ATTEMPT 2: CSV (Fallback)
+        # We try common encodings just in case
+        for enc in ['utf-8', 'cp1252', 'latin1']:
+            try:
+                df = pd.read_csv(file_path, dtype=str, sep=None, engine='python', encoding=enc)
+                st.toast(f"ℹ️ Loaded '{file_path}' as a CSV.", icon="⚠️")
+                break
+            except:
+                continue
+    
+    if df is None:
+        st.error(f"❌ Could not read '{file_path}'. It is not a valid Excel or CSV file.")
+        st.stop()
 
-    # Clean headers
+    # Clean headers (remove extra spaces/newlines)
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
     
     # Filter for 'Glasses'
@@ -40,17 +49,17 @@ def load_master():
     if target_col:
         return df[df[target_col] == "Glasses"]
     else:
-        st.error("❌ 'Items type' missing in Master."); st.stop()
+        st.error("❌ 'Items type' column missing in Master File."); st.stop()
 
 def clean_user_file(file):
-    """Loads user file, assumes Header is Row 0."""
+    """Loads user file, always using the first row (0) as header."""
     try:
         df = pd.read_excel(file, dtype=str, header=0)
     except:
         file.seek(0)
         df = pd.read_csv(file, dtype=str, sep=None, engine='python', header=0)
     
-    # Clean headers (remove extra spaces/newlines)
+    # Clean headers
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
     return df
 
