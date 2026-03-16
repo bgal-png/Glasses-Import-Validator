@@ -26,42 +26,16 @@ st.title("Glasses Import Validator 😎")
 def load_master():
     """
     Downloads master_clean.xlsx from Supabase Storage.
-    Falls back to local file if Supabase is unreachable.
     """
-    df = None
     filename = "master_clean.xlsx"
     url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
 
-    # ATTEMPT 1: Supabase Storage
     try:
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
         df = pd.read_excel(io.BytesIO(resp.content), dtype=str, engine='openpyxl')
-        st.toast("☁️ Master loaded from Supabase.", icon="☁️")
     except Exception as e:
-        st.warning(f"⚠️ Supabase unavailable ({e}). Trying local fallback...")
-
-    # ATTEMPT 2: Local fallback
-    if df is None:
-        current_dir = os.getcwd()
-        candidates = [f for f in os.listdir(current_dir) if (f.endswith('.xlsx') or f.endswith('.csv')) and "mistakes" not in f and "name_master" not in f and not f.startswith('~$')]
-        if not candidates:
-            st.error("❌ No Master File found (Supabase + local both failed)!"); st.stop()
-        file_path = candidates[0]
-        try:
-            df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
-        except Exception:
-            strategies = [{'sep': None, 'engine': 'python'}, {'sep': ',', 'engine': 'c'}, {'sep': ';', 'engine': 'c'}, {'sep': '\t', 'engine': 'c'}]
-            for enc in ['utf-8', 'cp1252', 'latin1']:
-                for strat in strategies:
-                    try:
-                        df = pd.read_csv(file_path, dtype=str, encoding=enc, on_bad_lines='skip', **strat)
-                        break
-                    except: continue
-                if df is not None: break
-
-    if df is None:
-        st.error("❌ Could not load Master File from any source.")
+        st.error(f"❌ Could not load Master File from Supabase: {e}")
         st.stop()
 
     # Clean headers
@@ -82,9 +56,7 @@ def load_master():
 def load_name_master():
     """
     Downloads name_master_clean.xlsx from Supabase Storage.
-    Falls back to local file if Supabase is unreachable.
     """
-    df = None
     filename = "name_master_clean.xlsx"
     url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
 
@@ -93,35 +65,12 @@ def load_name_master():
         c = col_name.strip().lower()
         return c == "name" or "name_private" in c
 
-    # ATTEMPT 1: Supabase Storage
     try:
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
         df = pd.read_excel(io.BytesIO(resp.content), dtype=str, engine='openpyxl', usecols=column_filter)
-        st.toast("☁️ Name Master loaded from Supabase.", icon="☁️")
     except Exception:
-        pass
-
-    # ATTEMPT 2: Local fallback
-    if df is None:
-        target_filename = filename
-        if not os.path.exists(target_filename):
-            candidates = [f for f in os.listdir('.') if "name_master" in f and not f.startswith('~$')]
-            if not candidates: return None
-            target_filename = candidates[0]
-        try:
-            df = pd.read_excel(target_filename, dtype=str, engine='openpyxl', usecols=column_filter)
-        except Exception:
-            strategies = [{'sep': None, 'engine': 'python'}, {'sep': ',', 'engine': 'c'}, {'sep': ';', 'engine': 'c'}]
-            for enc in ['utf-8', 'cp1252', 'latin1']:
-                for strat in strategies:
-                    try:
-                        df = pd.read_csv(target_filename, dtype=str, encoding=enc, on_bad_lines='skip', usecols=column_filter, **strat)
-                        break
-                    except: continue
-                if df is not None: break
-
-    if df is None: return None
+        return None
 
     # Clean Headers
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
