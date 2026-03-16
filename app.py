@@ -4,8 +4,15 @@ import os
 import io
 import zipfile
 import numpy as np
+import requests
 from PIL import Image
 from sklearn.cluster import KMeans
+
+# ==========================================
+# ☁️ SUPABASE CONFIG
+# ==========================================
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://rtjjxaueqvbtlciqqjcb.supabase.co")
+SUPABASE_BUCKET = st.secrets.get("SUPABASE_BUCKET", "master-files")
 
 # 1. Page Configuration
 st.set_page_config(page_title="Excel Validator v2", layout="wide")
@@ -13,62 +20,53 @@ st.title("Glasses Import Validator 😎")
 
 # ==========================================
 # 🔒 LOCKED: MAIN MASTER LOADER (Tab 1)
-# RESTORED: The "Indestructible" Version
+# Now loads from Supabase Storage
 # ==========================================
 @st.cache_data
 def load_master():
     """
-    TRULY INDESTRUCTIBLE LOADER
-    1. Tries Excel (.xlsx)
-    2. If that fails, tries CSV with Auto-Separator.
-    3. If that fails, tries CSV with comma/semicolon explicitly.
+    Downloads master_clean.xlsx from Supabase Storage.
+    Falls back to local file if Supabase is unreachable.
     """
-    current_dir = os.getcwd()
-    # Exclude 'name_master' so we don't accidentally load the wrong file here
-    candidates = [f for f in os.listdir(current_dir) if (f.endswith('.xlsx') or f.endswith('.csv')) and "mistakes" not in f and "name_master" not in f and not f.startswith('~$')]
-    
-    if not candidates:
-        st.error("❌ No Master File found!"); st.stop()
-    
-    file_path = candidates[0]
     df = None
-    
-    # ATTEMPT 1: EXCEL (Standard)
+    filename = "master_clean.xlsx"
+    url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
+
+    # ATTEMPT 1: Supabase Storage
     try:
-        df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
-    except Exception:
-        # ATTEMPT 2: CSV (Fallback loop)
-        strategies = [
-            {'sep': None, 'engine': 'python'}, # Auto-detect
-            {'sep': ',', 'engine': 'c'},       # Standard Comma
-            {'sep': ';', 'engine': 'c'},       # Semicolon
-            {'sep': '\t', 'engine': 'c'}       # Tab
-        ]
-        
-        for enc in ['utf-8', 'cp1252', 'latin1']:
-            for strat in strategies:
-                try:
-                    df = pd.read_csv(
-                        file_path, 
-                        dtype=str, 
-                        encoding=enc, 
-                        on_bad_lines='skip', 
-                        **strat
-                    )
-                    st.toast(f"ℹ️ Loaded '{file_path}' as CSV (Fallback).", icon="ℹ️")
-                    break
-                except:
-                    continue
-            if df is not None:
-                break
-    
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        df = pd.read_excel(io.BytesIO(resp.content), dtype=str, engine='openpyxl')
+        st.toast("☁️ Master loaded from Supabase.", icon="☁️")
+    except Exception as e:
+        st.warning(f"⚠️ Supabase unavailable ({e}). Trying local fallback...")
+
+    # ATTEMPT 2: Local fallback
     if df is None:
-        st.error(f"❌ Could not read '{file_path}'. Tried Excel and all CSV formats.")
+        current_dir = os.getcwd()
+        candidates = [f for f in os.listdir(current_dir) if (f.endswith('.xlsx') or f.endswith('.csv')) and "mistakes" not in f and "name_master" not in f and not f.startswith('~$')]
+        if not candidates:
+            st.error("❌ No Master File found (Supabase + local both failed)!"); st.stop()
+        file_path = candidates[0]
+        try:
+            df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
+        except Exception:
+            strategies = [{'sep': None, 'engine': 'python'}, {'sep': ',', 'engine': 'c'}, {'sep': ';', 'engine': 'c'}, {'sep': '\t', 'engine': 'c'}]
+            for enc in ['utf-8', 'cp1252', 'latin1']:
+                for strat in strategies:
+                    try:
+                        df = pd.read_csv(file_path, dtype=str, encoding=enc, on_bad_lines='skip', **strat)
+                        break
+                    except: continue
+                if df is not None: break
+
+    if df is None:
+        st.error("❌ Could not load Master File from any source.")
         st.stop()
 
     # Clean headers
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
-    
+
     # Filter for 'Glasses'
     target_col = next((c for c in df.columns if "Items type" in c), None)
     if target_col:
@@ -78,56 +76,50 @@ def load_master():
 
 # ==========================================
 # ⚡ SURGICAL LOADER: NAME MASTER (Tab 3)
-# optimized for speed & memory
+# Now loads from Supabase Storage
 # ==========================================
 @st.cache_data
 def load_name_master():
     """
-    SURGICAL LOADER.
-    Only loads columns 'name' and 'name_private'.
-    Ignores everything else to run fast.
+    Downloads name_master_clean.xlsx from Supabase Storage.
+    Falls back to local file if Supabase is unreachable.
     """
-    target_filename = "name_master_clean.xlsx"
-    
-    if not os.path.exists(target_filename):
-        candidates = [f for f in os.listdir('.') if "name_master" in f and not f.startswith('~$')]
-        if not candidates: return None
-        target_filename = candidates[0]
-
     df = None
+    filename = "name_master_clean.xlsx"
+    url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
 
-    # DEFINING THE FILTER:
-    # We use a lambda function to tell Pandas WHICH columns to keep.
     def column_filter(col_name):
         if not isinstance(col_name, str): return False
         c = col_name.strip().lower()
         return c == "name" or "name_private" in c
 
-    # ATTEMPT 1: EXCEL (With Column Filter)
+    # ATTEMPT 1: Supabase Storage
     try:
-        df = pd.read_excel(
-            target_filename, 
-            dtype=str, 
-            engine='openpyxl',
-            usecols=column_filter
-        )
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        df = pd.read_excel(io.BytesIO(resp.content), dtype=str, engine='openpyxl', usecols=column_filter)
+        st.toast("☁️ Name Master loaded from Supabase.", icon="☁️")
     except Exception:
-        # ATTEMPT 2: CSV (With Column Filter)
-        strategies = [{'sep': None, 'engine': 'python'}, {'sep': ',', 'engine': 'c'}, {'sep': ';', 'engine': 'c'}]
-        for enc in ['utf-8', 'cp1252', 'latin1']:
-            for strat in strategies:
-                try:
-                    df = pd.read_csv(
-                        target_filename, 
-                        dtype=str, 
-                        encoding=enc, 
-                        on_bad_lines='skip', 
-                        usecols=column_filter,
-                        **strat
-                    )
-                    break
-                except: continue
-            if df is not None: break
+        pass
+
+    # ATTEMPT 2: Local fallback
+    if df is None:
+        target_filename = filename
+        if not os.path.exists(target_filename):
+            candidates = [f for f in os.listdir('.') if "name_master" in f and not f.startswith('~$')]
+            if not candidates: return None
+            target_filename = candidates[0]
+        try:
+            df = pd.read_excel(target_filename, dtype=str, engine='openpyxl', usecols=column_filter)
+        except Exception:
+            strategies = [{'sep': None, 'engine': 'python'}, {'sep': ',', 'engine': 'c'}, {'sep': ';', 'engine': 'c'}]
+            for enc in ['utf-8', 'cp1252', 'latin1']:
+                for strat in strategies:
+                    try:
+                        df = pd.read_csv(target_filename, dtype=str, encoding=enc, on_bad_lines='skip', usecols=column_filter, **strat)
+                        break
+                    except: continue
+                if df is not None: break
 
     if df is None: return None
 
@@ -137,13 +129,13 @@ def load_name_master():
     # 1. FILTER: Column 'name_private' must contain "glasses"
     private_col = next((c for c in df.columns if "name_private" in c), None)
     if not private_col: return None
-        
+
     filtered_df = df[df[private_col].str.contains("glasses", case=False, na=False)]
-    
+
     # 2. TARGET: Column 'name'
     name_col = next((c for c in df.columns if "name" == c or "name" == c.strip()), None)
     if not name_col: return None
-         
+
     return filtered_df[name_col].dropna().unique().tolist()
 
 # ==========================================

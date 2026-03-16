@@ -5,3 +5,4 @@ thefuzz
 xlsxwriter
 Pillow
 scikit-learn
+requests
