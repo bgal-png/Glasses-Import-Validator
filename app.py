@@ -258,6 +258,47 @@ if uploaded_file:
     # TAB 1: DATA VALIDATION
     # ------------------------------------------
     with tab1:
+        # Keywords used to match required columns in user file
+        # (handles line breaks / whitespace in headers)
+        REQUIRED_COLUMN_KEYWORDS = [
+            "Glasses name",
+            "Meta description",
+            "XML description",
+            "Combination",
+            "Barcode",
+            "Glasses type ID",
+            "Manufacturer ID",
+            "width ID",
+            "temple length ID",
+            "lens height ID",
+            "lens width ID",
+            "bridge ID",
+            "Glasses shape ID",
+            "frame type ID",
+            "Frame Colour ID",
+            "Temple Colour ID",
+            "main material ID",
+            "lens Colour ID",
+            "lens material ID",
+            "gendre ID",
+            "Items type ID",
+            "Items packing ID",
+            "Glasses contain ID",
+            "Glasses model ID",
+            "color code ID",
+            "other features",
+            "Brand ID",
+            "HS Code",
+            "Item description",
+            "Case length",
+            "Case height",
+            "Case width",
+            "Case weight",
+            "Glasses weight",
+            "origin country",
+            "Producing company ID",
+        ]
+
         IDEAL_PAIRS = {
             "Glasses type": "Glasses type ID",
             "Manufacturer": "Manufacturer ID",
@@ -304,8 +345,34 @@ if uploaded_file:
         
         st.write(f"🔗 Mapped **{len(active_map)}** columns.")
 
+        # Match required columns to actual user file columns
+        required_col_map = {}
+        for keyword in REQUIRED_COLUMN_KEYWORDS:
+            matched = next((c for c in user_cols if keyword.lower() in c.lower()), None)
+            if matched:
+                required_col_map[keyword] = matched
+
+        st.write(f"🔒 Found **{len(required_col_map)}** / {len(REQUIRED_COLUMN_KEYWORDS)} required columns.")
+
+        # Show unmatched required columns as warning
+        unmatched = [kw for kw in REQUIRED_COLUMN_KEYWORDS if kw not in required_col_map]
+        if unmatched:
+            with st.expander(f"⚠️ {len(unmatched)} required columns not found in file"):
+                for u in unmatched:
+                    st.write(f"- `{u}`")
+
         if st.button("🚀 Run Validation", type="primary"):
             mistakes = []
+            empty_cells = []
+
+            # --- EMPTY REQUIRED FIELDS CHECK ---
+            for keyword, u_col in required_col_map.items():
+                for idx, row in user_df.iterrows():
+                    raw_val = str(row[u_col]).strip()
+                    if raw_val.lower() in ['nan', '', 'none']:
+                        empty_cells.append({"Row": idx+2, "Column": u_col, "Error": "Empty Required Field"})
+
+            # --- CONTENT VALIDATION ---
             valid_values = {}
             for m_col in active_map.keys():
                 raw = master_df[m_col].dropna().astype(str)
@@ -321,7 +388,7 @@ if uploaded_file:
                 for m_col, u_col in active_map.items():
                     raw_val = str(row[u_col])
                     if raw_val.lower() in ['nan', '', 'none']: continue
-                    
+
                     ws_issues = []
                     if raw_val.startswith(" "): ws_issues.append("Leading Space")
                     if raw_val.endswith(" "): ws_issues.append("Trailing Space")
@@ -335,12 +402,25 @@ if uploaded_file:
                     for p in parts:
                         if p and p.lower() not in valid_values[m_col]:
                              mistakes.append({"Row": idx+2, "Column": u_col, "Error": "Invalid Content", "Value": p, "Content": raw_val, "Allowed": list(valid_values[m_col])[:3]})
-            
+
             progress_bar.empty()
+
+            # --- DISPLAY RESULTS ---
+            # Empty fields section
+            if empty_cells:
+                st.error(f"🔒 Found {len(empty_cells)} empty required fields!")
+                st.dataframe(pd.DataFrame(empty_cells), use_container_width=True)
+            else:
+                st.success("✅ All required fields are filled!")
+
+            st.divider()
+
+            # Content validation section
             if mistakes:
-                st.error(f"Found {len(mistakes)} Issues!")
+                st.error(f"Found {len(mistakes)} content/whitespace issues!")
                 st.dataframe(pd.DataFrame(mistakes), use_container_width=True)
-            else: st.balloons(); st.success("✅ Clean!")
+            else:
+                st.balloons(); st.success("✅ Content validation clean!")
 
     # ------------------------------------------
     # TAB 2: IMAGE CHECKER
