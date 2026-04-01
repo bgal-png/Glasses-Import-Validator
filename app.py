@@ -283,7 +283,6 @@ if uploaded_file:
             "Glasses contain ID",
             "Glasses model ID",
             "color code ID",
-            "other features",
             "Brand ID",
             "HS Code",
             "Item description",
