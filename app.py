@@ -277,7 +277,6 @@ if uploaded_file:
             "Frame Colour ID",
             "Temple Colour ID",
             "main material ID",
-            "lens material ID",
             "gendre ID",
             "Items type ID",
             "Items packing ID",
@@ -295,6 +294,14 @@ if uploaded_file:
             "Glasses weight",
             "origin country",
             "Producing company ID",
+        ]
+
+        # Columns only required for Sunglasses (detected from Meta description)
+        SUNGLASSES_REQUIRED_KEYWORDS = [
+            "lens Colour ID",
+            "lens material ID",
+            "lens effect ID",
+            "Sunglasses filter ID",
         ]
 
         IDEAL_PAIRS = {
@@ -350,10 +357,23 @@ if uploaded_file:
             if matched:
                 required_col_map[keyword] = matched
 
-        st.write(f"🔒 Found **{len(required_col_map)}** / {len(REQUIRED_COLUMN_KEYWORDS)} required columns.")
+        # Match sunglasses-only required columns
+        sunglasses_col_map = {}
+        for keyword in SUNGLASSES_REQUIRED_KEYWORDS:
+            matched = next((c for c in user_cols if keyword.lower() in c.lower()), None)
+            if matched:
+                sunglasses_col_map[keyword] = matched
+
+        # Find the Meta description column (used to detect glasses type)
+        meta_col = next((c for c in user_cols if "meta description" in c.lower()), None)
+
+        all_required_count = len(REQUIRED_COLUMN_KEYWORDS) + len(SUNGLASSES_REQUIRED_KEYWORDS)
+        all_found_count = len(required_col_map) + len(sunglasses_col_map)
+        st.write(f"🔒 Found **{all_found_count}** / {all_required_count} required columns (incl. {len(sunglasses_col_map)} sunglasses-only).")
 
         # Show unmatched required columns as warning
         unmatched = [kw for kw in REQUIRED_COLUMN_KEYWORDS if kw not in required_col_map]
+        unmatched += [f"{kw} (sunglasses only)" for kw in SUNGLASSES_REQUIRED_KEYWORDS if kw not in sunglasses_col_map]
         if unmatched:
             with st.expander(f"⚠️ {len(unmatched)} required columns not found in file"):
                 for u in unmatched:
@@ -364,11 +384,23 @@ if uploaded_file:
             empty_cells = []
 
             # --- EMPTY REQUIRED FIELDS CHECK ---
-            for keyword, u_col in required_col_map.items():
-                for idx, row in user_df.iterrows():
+            for idx, row in user_df.iterrows():
+                # Detect glasses type from Meta description
+                meta_val = str(row[meta_col]).strip().lower() if meta_col else ""
+                is_sunglasses = meta_val.startswith("sunglasses")
+
+                # Always-required columns
+                for keyword, u_col in required_col_map.items():
                     raw_val = str(row[u_col]).strip()
                     if raw_val.lower() in ['nan', '', 'none']:
                         empty_cells.append({"Row": idx+2, "Column": u_col, "Error": "Empty Required Field"})
+
+                # Sunglasses-only required columns
+                if is_sunglasses:
+                    for keyword, u_col in sunglasses_col_map.items():
+                        raw_val = str(row[u_col]).strip()
+                        if raw_val.lower() in ['nan', '', 'none']:
+                            empty_cells.append({"Row": idx+2, "Column": u_col, "Error": "Empty Required Field (Sunglasses)"})
 
             # --- CONTENT VALIDATION ---
             valid_values = {}
