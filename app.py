@@ -277,7 +277,6 @@ if uploaded_file:
             "Frame Colour ID",
             "Temple Colour ID",
             "main material ID",
-            "lens Colour ID",
             "lens material ID",
             "gendre ID",
             "Items type ID",
