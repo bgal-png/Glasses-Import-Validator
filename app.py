@@ -268,7 +268,6 @@ if uploaded_file:
             "Barcode",
             "Glasses type ID",
             "Manufacturer ID",
-            "width ID",
             "temple length ID",
             "lens height ID",
             "lens width ID",
