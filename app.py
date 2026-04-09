@@ -4,15 +4,8 @@ import os
 import io
 import zipfile
 import numpy as np
-import requests
 from PIL import Image
 from sklearn.cluster import KMeans
-
-# ==========================================
-# ☁️ SUPABASE CONFIG
-# ==========================================
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://rtjjxaueqvbtlciqqjcb.supabase.co")
-SUPABASE_BUCKET = st.secrets.get("SUPABASE_BUCKET", "master-files")
 
 # 1. Page Configuration
 st.set_page_config(page_title="Excel Validator v2", layout="wide")
@@ -20,23 +13,42 @@ st.title("Glasses Import Validator 😎")
 
 # ==========================================
 # 🔒 LOCKED: MAIN MASTER LOADER (Tab 1)
-# Now loads from Supabase Storage
 # ==========================================
 @st.cache_data
 def load_master():
     """
-    Downloads master_clean.xlsx from Supabase Storage.
+    INDESTRUCTIBLE LOADER
+    1. Tries Excel (.xlsx)
+    2. If that fails, tries CSV with Auto-Separator.
     """
-    filename = "master_clean.xlsx"
-    url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
+    current_dir = os.getcwd()
+    candidates = [f for f in os.listdir(current_dir) if (f.endswith('.xlsx') or f.endswith('.csv')) and "mistakes" not in f and "name_master" not in f and not f.startswith('~$')]
+
+    if not candidates:
+        st.error("❌ No Master File found!"); st.stop()
+
+    file_path = candidates[0]
+    df = None
 
     try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        df = pd.read_excel(io.BytesIO(resp.content), dtype=str, engine='openpyxl')
-    except Exception as e:
-        st.error(f"❌ Could not load Master File from Supabase: {e}")
-        st.stop()
+        df = pd.read_excel(file_path, dtype=str, engine='openpyxl')
+    except Exception:
+        strategies = [
+            {'sep': None, 'engine': 'python'},
+            {'sep': ',', 'engine': 'c'},
+            {'sep': ';', 'engine': 'c'},
+            {'sep': '\t', 'engine': 'c'}
+        ]
+        for enc in ['utf-8', 'cp1252', 'latin1']:
+            for strat in strategies:
+                try:
+                    df = pd.read_csv(file_path, dtype=str, encoding=enc, on_bad_lines='skip', **strat)
+                    break
+                except: continue
+            if df is not None: break
+
+    if df is None:
+        st.error(f"❌ Could not read '{file_path}'."); st.stop()
 
     # Clean headers
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
@@ -50,15 +62,21 @@ def load_master():
 
 # ==========================================
 # ⚡ SURGICAL LOADER: NAME MASTER (Tab 3)
-# Now loads from Supabase Storage
 # ==========================================
 @st.cache_data
 def load_name_master():
     """
-    Downloads name_master_clean.xlsx from Supabase Storage.
+    SURGICAL LOADER.
+    Only loads columns 'name' and 'name_private'.
     """
-    filename = "name_master_clean.xlsx"
-    url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
+    target_filename = "name_master_clean.xlsx"
+
+    if not os.path.exists(target_filename):
+        candidates = [f for f in os.listdir('.') if "name_master" in f and not f.startswith('~$')]
+        if not candidates: return None
+        target_filename = candidates[0]
+
+    df = None
 
     def column_filter(col_name):
         if not isinstance(col_name, str): return False
@@ -66,11 +84,18 @@ def load_name_master():
         return c == "name" or "name_private" in c
 
     try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        df = pd.read_excel(io.BytesIO(resp.content), dtype=str, engine='openpyxl', usecols=column_filter)
+        df = pd.read_excel(target_filename, dtype=str, engine='openpyxl', usecols=column_filter)
     except Exception:
-        return None
+        strategies = [{'sep': None, 'engine': 'python'}, {'sep': ',', 'engine': 'c'}, {'sep': ';', 'engine': 'c'}]
+        for enc in ['utf-8', 'cp1252', 'latin1']:
+            for strat in strategies:
+                try:
+                    df = pd.read_csv(target_filename, dtype=str, encoding=enc, on_bad_lines='skip', usecols=column_filter, **strat)
+                    break
+                except: continue
+            if df is not None: break
+
+    if df is None: return None
 
     # Clean Headers
     df.columns = df.columns.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
