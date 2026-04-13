@@ -427,13 +427,16 @@ if uploaded_file:
                             empty_cells.append({"Row": idx+2, "Column": u_col, "Error": "Empty Required Field (Sunglasses)"})
 
             # --- CONTENT VALIDATION ---
-            valid_values = {}
+            # Build case-insensitive lookup map: lowercase -> exact master casing
+            valid_values_ci = {}
             for m_col in active_map.keys():
                 raw = master_df[m_col].dropna().astype(str)
-                exploded = raw.str.split(r',+').explode()
-                clean_set = set(exploded.str.strip().str.lower())
-                if "" in clean_set: clean_set.remove("")
-                valid_values[m_col] = clean_set
+                exploded = raw.str.split(r',+').explode().str.strip()
+                mapping = {}
+                for v in exploded:
+                    if v and v.lower() not in mapping:
+                        mapping[v.lower()] = v  # keep first-seen casing from master
+                valid_values_ci[m_col] = mapping
 
             progress_bar = st.progress(0)
             total_rows = len(user_df)
@@ -453,9 +456,14 @@ if uploaded_file:
 
                     clean_val = raw_val.strip()
                     parts = [v.strip() for v in clean_val.split('|')]
+                    ci_map = valid_values_ci[m_col]
                     for p in parts:
-                        if p and p.lower() not in valid_values[m_col]:
-                             mistakes.append({"Row": idx+2, "Column": u_col, "Error": "Invalid Content", "Value": p, "Content": raw_val, "Allowed": list(valid_values[m_col])[:3]})
+                        if not p:
+                            continue
+                        if p.lower() not in ci_map:
+                            mistakes.append({"Row": idx+2, "Column": u_col, "Error": "Invalid Content", "Value": p, "Content": raw_val, "Allowed": list(ci_map.values())[:3]})
+                        elif p != ci_map[p.lower()]:
+                            mistakes.append({"Row": idx+2, "Column": u_col, "Error": "Case Mismatch", "Value": p, "Content": raw_val, "Expected": ci_map[p.lower()]})
 
             progress_bar.empty()
 
