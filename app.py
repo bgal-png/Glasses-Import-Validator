@@ -785,7 +785,23 @@ if uploaded_file:
                     allowed_present = sorted([b for b in user_brands if b.lower() in allowed_lower])
                     label = "not allowed"
 
-                if flagged:
+                if allowed_present is not None:
+                    # Allowlist site — combine both sections into one card
+                    header = f"⚠️ **{site}** — {len(flagged)} not allowed / {len(allowed_present)} allowed" if flagged else f"✅ **{site}** — {len(allowed_present)} allowed brand(s) present"
+                    if flagged:
+                        any_issues = True
+                    with st.expander(header, expanded=bool(flagged)):
+                        if flagged:
+                            st.markdown("**🚫 Not allowed:**")
+                            cols = st.columns(4)
+                            for i, brand in enumerate(flagged):
+                                cols[i % 4].error(brand)
+                            st.divider()
+                        st.markdown("**✅ Allowed:**")
+                        cols = st.columns(4)
+                        for i, brand in enumerate(allowed_present):
+                            cols[i % 4].success(brand)
+                elif flagged:
                     any_issues = True
                     with st.expander(f"⚠️ **{site}** — {len(flagged)} brand(s) {label}", expanded=True):
                         cols = st.columns(4)
@@ -793,13 +809,6 @@ if uploaded_file:
                             cols[i % 4].error(brand)
                 else:
                     st.success(f"✅ **{site}** — No issues")
-
-                # For allowlist sites, also show which brands ARE allowed
-                if allowed_present is not None:
-                    with st.expander(f"✅ **{site}** — {len(allowed_present)} allowed brand(s) present in file"):
-                        cols = st.columns(4)
-                        for i, brand in enumerate(allowed_present):
-                            cols[i % 4].success(brand)
 
             if not any_issues:
                 st.balloons()
