@@ -277,7 +277,7 @@ if uploaded_file:
     user_df = clean_user_file(uploaded_file)
     st.info(f"User file loaded: {len(user_df)} rows.")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Data Validation", "🖼️ Image Checker", "🧬 Syntax & Duplicates", "🎨 Color Checker"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Data Validation", "🖼️ Image Checker", "🧬 Syntax & Duplicates", "🎨 Color Checker", "🚫 Banned Brands"])
 
     # ------------------------------------------
     # TAB 1: DATA VALIDATION
@@ -718,3 +718,79 @@ if uploaded_file:
                         if skipped:
                             with st.expander(f"⚠️ {len(skipped)} images skipped"):
                                 st.dataframe(pd.DataFrame(skipped), use_container_width=True)
+
+    # ------------------------------------------
+    # TAB 5: BANNED BRANDS
+    # ------------------------------------------
+    with tab5:
+        st.subheader("🚫 Banned Brands Checker")
+        st.info("Checks which brands in your file are banned on specific websites. Alensa.ua shows brands that are **not** on the allowed list.")
+
+        # ---- BANNED / ALLOWED LISTS ----
+        SITE_BANNED = {
+            "Čočky-kontaktni.cz": {
+                "type": "banned",
+                "brands": {"Calvin Klein", "Dolce & Gabbana", "Chiara Ferragni", "Jimmy Choo", "Lacoste", "Marisio", "Missoni", "Montblanc", "Persol"},
+            },
+            "Čočky-online.cz": {
+                "type": "banned",
+                "brands": {"Gucci", "Chiara Ferragni", "Christian Dior", "Julbo", "Just Cavalli", "Montblanc"},
+            },
+            "Čočky-optika.cz": {
+                "type": "banned",
+                "brands": {"Givenchy", "Havaianas", "Christian Dior", "Julbo", "Just Cavalli", "Kate Spade"},
+            },
+            "Alensa.ua": {
+                "type": "allowed",
+                "brands": {"Crullé", "Marisio", "Kimikado", "Lewish", "Beron", "Válle", "Polaroid"},
+            },
+        }
+
+        # Find Brand column in user file
+        brand_col = next((c for c in user_df.columns if "brand" in c.lower() and "id" not in c.lower()), None)
+        if not brand_col:
+            brand_col = next((c for c in user_df.columns if "brand" in c.lower()), None)
+
+        if not brand_col:
+            st.error("❌ No Brand column found in the uploaded file.")
+        else:
+            st.write(f"📂 **Using column:** `{brand_col}`")
+
+            # Get unique brands from user file (handle pipe-separated values)
+            user_brands_raw = user_df[brand_col].dropna().astype(str).str.strip()
+            user_brands = set()
+            for val in user_brands_raw:
+                for b in val.split('|'):
+                    b = b.strip()
+                    if b and b.lower() not in ['nan', '', 'none']:
+                        user_brands.add(b)
+
+            st.write(f"🏷️ Found **{len(user_brands)}** unique brands in file.")
+
+            # ---- CHECK EACH SITE ----
+            any_issues = False
+            for site, config in SITE_BANNED.items():
+                site_type = config["type"]
+                site_brands = config["brands"]
+
+                if site_type == "banned":
+                    # Case-insensitive match
+                    flagged = sorted([b for b in user_brands if b.lower() in {s.lower() for s in site_brands}])
+                    label = "banned"
+                else:
+                    # Allowed list — flag brands NOT in the allowed set
+                    flagged = sorted([b for b in user_brands if b.lower() not in {s.lower() for s in site_brands}])
+                    label = "not allowed"
+
+                if flagged:
+                    any_issues = True
+                    with st.expander(f"⚠️ **{site}** — {len(flagged)} brand(s) {label}", expanded=True):
+                        cols = st.columns(4)
+                        for i, brand in enumerate(flagged):
+                            cols[i % 4].error(brand)
+                else:
+                    st.success(f"✅ **{site}** — No issues")
+
+            if not any_issues:
+                st.balloons()
+                st.success("✅ No banned or restricted brands found across all sites!")
