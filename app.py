@@ -776,10 +776,13 @@ if uploaded_file:
                 if site_type == "banned":
                     # Case-insensitive match
                     flagged = sorted([b for b in user_brands if b.lower() in {s.lower() for s in site_brands}])
+                    allowed_present = None
                     label = "banned"
                 else:
                     # Allowed list — flag brands NOT in the allowed set
-                    flagged = sorted([b for b in user_brands if b.lower() not in {s.lower() for s in site_brands}])
+                    allowed_lower = {s.lower() for s in site_brands}
+                    flagged = sorted([b for b in user_brands if b.lower() not in allowed_lower])
+                    allowed_present = sorted([b for b in user_brands if b.lower() in allowed_lower])
                     label = "not allowed"
 
                 if flagged:
@@ -790,6 +793,13 @@ if uploaded_file:
                             cols[i % 4].error(brand)
                 else:
                     st.success(f"✅ **{site}** — No issues")
+
+                # For allowlist sites, also show which brands ARE allowed
+                if allowed_present is not None:
+                    with st.expander(f"✅ **{site}** — {len(allowed_present)} allowed brand(s) present in file"):
+                        cols = st.columns(4)
+                        for i, brand in enumerate(allowed_present):
+                            cols[i % 4].success(brand)
 
             if not any_issues:
                 st.balloons()
