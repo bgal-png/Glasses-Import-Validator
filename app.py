@@ -438,11 +438,9 @@ if uploaded_file:
                         mapping[v.lower()] = v  # keep first-seen casing from master
                 valid_values_ci[m_col] = mapping
 
-            progress_bar = st.progress(0)
-            total_rows = len(user_df)
+            # --- WHITESPACE CHECK (all columns) ---
             for idx, row in user_df.iterrows():
-                if idx % 10 == 0: progress_bar.progress(min(idx / total_rows, 1.0))
-                for m_col, u_col in active_map.items():
+                for u_col in user_cols:
                     raw_val = str(row[u_col])
                     if raw_val.lower() in ['nan', '', 'none']: continue
 
@@ -453,6 +451,15 @@ if uploaded_file:
                     if "| " in raw_val or " |" in raw_val: ws_issues.append("Space around Separator")
                     for ws in ws_issues:
                         mistakes.append({"Row": idx+2, "Column": u_col, "Error": "Whitespace", "Value": ws, "Content": raw_val})
+
+            # --- CONTENT VALIDATION (mapped columns only) ---
+            progress_bar = st.progress(0)
+            total_rows = len(user_df)
+            for idx, row in user_df.iterrows():
+                if idx % 10 == 0: progress_bar.progress(min(idx / total_rows, 1.0))
+                for m_col, u_col in active_map.items():
+                    raw_val = str(row[u_col])
+                    if raw_val.lower() in ['nan', '', 'none']: continue
 
                     clean_val = raw_val.strip()
                     parts = [v.strip() for v in clean_val.split('|')]
