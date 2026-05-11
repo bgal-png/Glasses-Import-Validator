@@ -439,18 +439,29 @@ if uploaded_file:
                 valid_values_ci[m_col] = mapping
 
             # --- WHITESPACE CHECK (all columns) ---
+            import re
+            # Matches ANY whitespace char incl. NBSP, tab, etc.
+            WS_CHARS = r"[\s ​ ﻿]"
             for idx, row in user_df.iterrows():
                 for u_col in user_cols:
                     raw_val = str(row[u_col])
                     if raw_val.lower() in ['nan', '', 'none']: continue
 
                     ws_issues = []
-                    if raw_val.startswith(" "): ws_issues.append("Leading Space")
-                    if raw_val.endswith(" "): ws_issues.append("Trailing Space")
-                    if "  " in raw_val: ws_issues.append("Double Spaces")
-                    if "| " in raw_val or " |" in raw_val: ws_issues.append("Space around Separator")
+                    # Leading/trailing: any whitespace char (incl. NBSP)
+                    if re.match(WS_CHARS, raw_val): ws_issues.append("Leading Space")
+                    if re.search(WS_CHARS + r"$", raw_val): ws_issues.append("Trailing Space")
+                    # Double whitespace anywhere
+                    if re.search(WS_CHARS + r"{2,}", raw_val): ws_issues.append("Double Spaces")
+                    # Whitespace around pipe separator
+                    if re.search(r"\|\s|\s\|", raw_val): ws_issues.append("Space around Separator")
+                    # NBSP anywhere (often invisible)
+                    if " " in raw_val: ws_issues.append("Non-Breaking Space (NBSP)")
+
                     for ws in ws_issues:
-                        mistakes.append({"Row": idx+2, "Column": u_col, "Error": "Whitespace", "Value": ws, "Content": raw_val})
+                        # Show raw value with whitespace made visible
+                        visible = raw_val.replace(" ", "[NBSP]").replace("\t", "[TAB]")
+                        mistakes.append({"Row": idx+2, "Column": u_col, "Error": "Whitespace", "Value": ws, "Content": visible})
 
             # --- CONTENT VALIDATION (mapped columns only) ---
             progress_bar = st.progress(0)
