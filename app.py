@@ -556,7 +556,7 @@ if uploaded_file:
                 if report:
                     st.error(f"Found {len(report)} Issues!")
                     res_df = pd.DataFrame(report)
-                    st.dataframe(res_df.style.applymap(lambda x: 'background-color: #ffcccc; color: black;' if x == "❌ DUPLICATE" else 'background-color: #fff4cc; color: black;', subset=['Issue']), use_container_width=True)
+                    st.dataframe(res_df.style.map(lambda x: 'background-color: #ffcccc; color: black;' if x == "❌ DUPLICATE" else 'background-color: #fff4cc; color: black;', subset=['Issue']), use_container_width=True)
                 else: st.balloons(); st.success("✅ Perfect! No duplicates and all syntax patterns look familiar.")
 
     # ------------------------------------------
