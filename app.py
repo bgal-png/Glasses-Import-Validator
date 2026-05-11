@@ -365,14 +365,26 @@ if uploaded_file:
         }
         
         active_map = {}
+        unmapped_pairs = []
         user_cols = list(user_df.columns)
         master_cols = list(master_df.columns)
         for mk, uk in IDEAL_PAIRS.items():
             rmc = next((c for c in master_cols if mk in c), None)
             ruc = next((c for c in user_cols if uk in c), None)
-            if rmc and ruc: active_map[rmc] = ruc
-        
-        st.write(f"🔗 Mapped **{len(active_map)}** columns.")
+            if rmc and ruc:
+                active_map[rmc] = ruc
+            else:
+                unmapped_pairs.append((mk, uk, rmc, ruc))
+
+        st.write(f"🔗 Mapped **{len(active_map)}** / {len(IDEAL_PAIRS)} columns.")
+
+        if unmapped_pairs:
+            with st.expander(f"⚠️ {len(unmapped_pairs)} unmapped column pair(s)"):
+                for mk, uk, rmc, ruc in unmapped_pairs:
+                    missing = []
+                    if not rmc: missing.append(f"master: `{mk}`")
+                    if not ruc: missing.append(f"user file: `{uk}`")
+                    st.write(f"- **{mk}** ← → **{uk}** — missing in {', '.join(missing)}")
 
         # Match required columns to actual user file columns
         required_col_map = {}
