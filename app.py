@@ -519,35 +519,93 @@ if uploaded_file:
     # ------------------------------------------
     with tab2:
         st.subheader("🖼️ Image Name vs. Excel Checker", help="To get images paths go to the folder containing images -> Select all (Ctrl + A) -> Right click -> Copy as paths")
-        
-        target_col_name = "Glasses name" 
+
+        target_col_name = "Glasses name"
         found_col = next((c for c in user_df.columns if target_col_name.lower() in c.lower()), user_df.columns[0])
         st.write(f"📂 **Using Excel Column:** `{found_col}`")
-        excel_names = set(user_df[found_col].dropna().astype(str).str.strip().str.lower().tolist())
+
+        # Excel names: preserve order, track duplicates with row numbers
+        excel_names_list = []  # (row_num, original_name, normalized_name)
+        for idx, val in user_df[found_col].dropna().astype(str).items():
+            clean = val.strip()
+            if clean.lower() in ['nan', '', 'none']: continue
+            excel_names_list.append((idx + 2, clean, clean.lower()))
+
+        excel_total = len(excel_names_list)
+        excel_unique = {n[2] for n in excel_names_list}
+
+        # Excel duplicates (same name in multiple rows)
+        from collections import Counter
+        excel_name_counts = Counter(n[2] for n in excel_names_list)
+        excel_duplicates = {name: cnt for name, cnt in excel_name_counts.items() if cnt > 1}
+
+        st.write(f"📋 **{excel_total}** names in Excel column (**{len(excel_unique)}** unique).")
 
         pasted_paths = st.text_area("Paste File Paths Here", height=300)
-        
+
         if st.button("🔍 Check Images"):
-            if not pasted_paths.strip(): st.warning("Paste paths first!")
+            if not pasted_paths.strip():
+                st.warning("Paste paths first!")
             else:
-                lines = pasted_paths.split('\n')
-                found_imgs = set()
+                # Parse pasted paths
+                lines = [l.strip() for l in pasted_paths.split('\n') if l.strip()]
+                img_entries = []  # list of normalized names (with duplicates preserved)
                 for line in lines:
-                    if not line.strip(): continue
-                    fname = line.split('\\')[-1] 
+                    fname = line.replace('"', '').split('\\')[-1].split('/')[-1]
                     cname = fname.rsplit('.', 1)[0] if '.' in fname else fname
-                    found_imgs.add(cname.replace('_', '/').strip().lower())
+                    norm = cname.replace('_', '/').strip().lower()
+                    if norm:
+                        img_entries.append(norm)
 
-                miss = [n for n in excel_names if n not in found_imgs]
-                extra = [n for n in found_imgs if n not in excel_names]
+                img_total = len(img_entries)
+                img_set = set(img_entries)
 
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.error(f"❌ Missing ({len(miss)})"); 
-                    if miss: st.dataframe(pd.DataFrame(miss, columns=["Missing"]), use_container_width=True)
-                with c2:
-                    st.warning(f"⚠️ Extra ({len(extra)})"); 
-                    if extra: st.dataframe(pd.DataFrame(extra, columns=["Extra"]), use_container_width=True)
+                # Image duplicates (same image filename pasted multiple times)
+                img_counts = Counter(img_entries)
+                img_duplicates = {name: cnt for name, cnt in img_counts.items() if cnt > 1}
+
+                # Match logic
+                matched = excel_unique & img_set
+                missing = [n for n in excel_names_list if n[2] not in img_set]  # rows missing image
+                extra = sorted(img_set - excel_unique)  # images without matching name
+
+                # ---- SUMMARY ----
+                st.divider()
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Names in Excel", excel_total)
+                c2.metric("Images Provided", img_total)
+                c3.metric("Matched", f"{len(matched)} / {len(excel_unique)}")
+
+                # ---- MISSING IMAGES ----
+                if missing:
+                    st.error(f"❌ {len(missing)} name(s) without image")
+                    st.dataframe(
+                        pd.DataFrame([{"Row": r, "Name": n} for r, n, _ in missing]),
+                        use_container_width=True
+                    )
+                else:
+                    st.success("✅ Every name has a matching image.")
+
+                # ---- DUPLICATE IMAGE PATHS ----
+                if img_duplicates:
+                    st.warning(f"⚠️ {len(img_duplicates)} duplicate image path(s) detected")
+                    st.dataframe(
+                        pd.DataFrame([{"Image": k, "Times Pasted": v} for k, v in img_duplicates.items()]),
+                        use_container_width=True
+                    )
+
+                # ---- DUPLICATE NAMES IN EXCEL ----
+                if excel_duplicates:
+                    with st.expander(f"⚠️ {len(excel_duplicates)} duplicate name(s) in Excel"):
+                        st.dataframe(
+                            pd.DataFrame([{"Name": k, "Occurrences": v} for k, v in excel_duplicates.items()]),
+                            use_container_width=True
+                        )
+
+                # ---- EXTRA IMAGES ----
+                if extra:
+                    with st.expander(f"⚠️ {len(extra)} extra image(s) with no matching Excel name"):
+                        st.dataframe(pd.DataFrame(extra, columns=["Extra Image"]), use_container_width=True)
 
     # ------------------------------------------
     # TAB 3: SYNTAX & DUPLICATES
