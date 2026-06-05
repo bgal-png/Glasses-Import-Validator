@@ -2,8 +2,10 @@ import streamlit as st
 import pandas as pd
 import os
 import io
+import re
 import zipfile
 import numpy as np
+from pathlib import Path
 from PIL import Image
 from sklearn.cluster import KMeans
 
@@ -253,6 +255,443 @@ def colors_match(expected_color, detected_colors):
     return False
 
 # ==========================================
+# 🏷️ IMAGE RENAMER (Tab 6)
+# Source: github.com/bgal-png/Tool-Hub/blob/main/tools/image_renamer.py
+# Renames glasses images to match canonical product list names.
+# ==========================================
+
+# Brand short code -> full brand name as written in the product list.
+BRAND_MAP = {
+    "BOSS": "Hugo Boss BOSS",
+    "HG": "Hugo Boss HG",
+    "MJ": "Marc Jacobs MJ",
+    "MARC": "Marc Jacobs MARC",
+    "TH": "Tommy Hilfiger TH",
+    "TJ": "Tommy Hilfiger TJ",
+    "D2": "Dsquared2 D2",
+    "ICON": "Dsquared2 ICON",
+    "DB": "David Beckham DB",
+    "IM": "Isabel Marant IM",
+    "HER": "Carolina Herrera HER",
+    "ETRO": "Etro ETRO",
+    "MIS": "Missoni MIS",
+    "MOS": "Moschino MOS",
+    "LV": "Levi's LV",
+    "PLD": "Polaroid PLD",
+    "CARRERA": "Carrera CARRERA",
+    "CA": "Carrera CA",
+    "C SPORT": "Carrera C SPORT",
+    "VICTORY": "Carrera VICTORY",
+    "MM": "Max Mara MM",
+    "MO": "MAX&Co. MO",
+    "FT": "Tom Ford FT",
+}
+
+MULTI_WORD_BRANDS = {k for k in BRAND_MAP if " " in k}
+
+KIDS_LINE = {
+    "PLD": ("Polaroid Kids PLD", lambda m: m and m[0].startswith("8")),
+}
+
+PHOTO_SUFFIX_RE = re.compile(r"^P\d{1,3}$", re.IGNORECASE)
+INVALID_FS_CHARS = set('<>:"/\\|?*')
+
+
+def parse_list_entry(line):
+    """Parse a product list line into a structured dict, or None if unparseable."""
+    line = line.strip()
+    if not line:
+        return None
+
+    words = line.split()
+    brand_idx = None
+    brand_short = None
+
+    for i in range(len(words) - 1):
+        pair = f"{words[i]} {words[i+1]}".upper()
+        if pair in MULTI_WORD_BRANDS:
+            brand_short = pair
+            brand_idx = i + 1
+            break
+
+    if brand_short is None:
+        candidate_range = words[:-2] if len(words) >= 3 else words
+        for i, w in enumerate(candidate_range):
+            wu = w.upper()
+            if wu in BRAND_MAP and wu not in MULTI_WORD_BRANDS:
+                brand_short = wu
+                brand_idx = i
+
+    if brand_short is None:
+        for i, w in enumerate(words):
+            wu = w.upper()
+            m = re.match(r"^([A-Z]+)(\d.*)$", wu)
+            if m and m.group(1) in BRAND_MAP:
+                brand_short = m.group(1)
+                brand_idx = i
+                break
+
+    if brand_short is None:
+        return None
+
+    full_brand_from_list = " ".join(words[: brand_idx + 1])
+
+    glued_match = re.match(r"^([A-Z]+)(\d.*)$", words[brand_idx].upper())
+    if glued_match and glued_match.group(1) == brand_short:
+        after_brand = [glued_match.group(2)] + words[brand_idx + 1:]
+    else:
+        after_brand = words[brand_idx + 1:]
+
+    if not after_brand:
+        return None
+
+    model_group = after_brand[0]
+    color_group = after_brand[1] if len(after_brand) > 1 else ""
+
+    model_parts = model_group.split("/")
+    color_parts = color_group.split("/") if color_group else []
+
+    full_brand = full_brand_from_list
+    if brand_short in KIDS_LINE:
+        kids_full, predicate = KIDS_LINE[brand_short]
+        if predicate(model_parts):
+            full_brand = kids_full
+
+    return {
+        "raw": line,
+        "brand_short": brand_short,
+        "full_brand": full_brand,
+        "model_parts": model_parts,
+        "color_parts": color_parts,
+    }
+
+
+def tokenize_source(filename):
+    """Strip extension, normalize separators, split into tokens, split glued brand prefix."""
+    stem = Path(filename).stem
+    norm = re.sub(r"[_\-]+", " ", stem)
+    tokens = norm.split()
+    if not tokens:
+        return []
+
+    m = re.match(r"^([A-Za-z]+)(\d.*)$", tokens[0])
+    if m and m.group(1).upper() in BRAND_MAP:
+        tokens = [m.group(1), m.group(2)] + tokens[1:]
+
+    return tokens
+
+
+def strip_trailing_noise(tokens):
+    out = list(tokens)
+    while out and PHOTO_SUFFIX_RE.match(out[-1]):
+        out.pop()
+    return out
+
+
+def find_brand_in_tokens(tokens):
+    last_idx = None
+    last_brand = None
+
+    for i in range(len(tokens) - 1):
+        pair = f"{tokens[i]} {tokens[i+1]}".upper()
+        if pair in BRAND_MAP:
+            last_idx = i + 1
+            last_brand = pair
+
+    for i, t in enumerate(tokens):
+        if t.upper() in BRAND_MAP:
+            last_idx = i
+            last_brand = t.upper()
+
+    if last_brand is None:
+        return None, None
+    return last_idx, last_brand
+
+
+def match_tokens_to_entry(tokens_after_brand, entry):
+    model = [m.upper() for m in entry["model_parts"]]
+    color = [c.upper() for c in entry["color_parts"]]
+
+    if not model:
+        return False, 0
+    if len(tokens_after_brand) < len(model):
+        return False, 0
+
+    for i, mp in enumerate(model):
+        if tokens_after_brand[i].upper() != mp:
+            return False, 0
+    cursor = len(model)
+
+    if not color:
+        return True, cursor
+
+    if cursor >= len(tokens_after_brand):
+        return False, 0
+
+    src_color = tokens_after_brand[cursor].upper()
+    full_color_concat = "".join(color)
+
+    if src_color == full_color_concat:
+        return True, cursor + 1
+    if src_color.startswith(full_color_concat):
+        return True, cursor + 1
+    if src_color == color[0]:
+        for j, cp in enumerate(color[1:], start=1):
+            idx = cursor + j
+            if idx >= len(tokens_after_brand) or tokens_after_brand[idx].upper() != cp:
+                return False, 0
+        return True, cursor + len(color)
+    if src_color == color[0] and len(color) == 1:
+        return True, cursor + 1
+
+    return False, 0
+
+
+def match_filename(filename, entries):
+    tokens = tokenize_source(filename)
+    if not tokens:
+        return {"status": "error", "reason": "Empty filename after parsing"}
+
+    tokens_clean = strip_trailing_noise(tokens)
+    brand_idx, brand_short = find_brand_in_tokens(tokens_clean)
+    if brand_short is None:
+        return {"status": "unknown_brand", "tokens": tokens_clean}
+
+    after_brand = tokens_clean[brand_idx + 1:]
+
+    candidates = [e for e in entries if e["brand_short"] == brand_short]
+    if not candidates:
+        return {"status": "no_brand_in_list", "brand_short": brand_short}
+
+    best_match = None
+    best_consumed = -1
+    for entry in candidates:
+        ok, consumed = match_tokens_to_entry(after_brand, entry)
+        if ok and consumed > best_consumed:
+            best_match = entry
+            best_consumed = consumed
+
+    if best_match is None:
+        return {
+            "status": "no_match",
+            "brand_short": brand_short,
+            "tokens_after_brand": after_brand,
+        }
+
+    return {"status": "matched", "entry": best_match}
+
+
+def safe_name(s):
+    return "".join("_" if c in INVALID_FS_CHARS else c for c in s)
+
+
+def target_name_for(entry, ext):
+    base = entry["raw"].replace("/", "_")
+    return safe_name(base) + ext
+
+
+def extract_photo_suffix(filename):
+    stem = Path(filename).stem
+    m = re.search(r"[_\-]P(\d{2,3})$", stem, re.IGNORECASE)
+    if m:
+        return f"P{m.group(1)}"
+    return None
+
+
+def resolve_collisions(plan):
+    groups = {}
+    for row in plan:
+        if row["status"] != "matched":
+            continue
+        groups.setdefault(row["target"], []).append(row)
+
+    for target, rows in groups.items():
+        if len(rows) < 2:
+            continue
+        existing = [extract_photo_suffix(r["source"]) for r in rows]
+        if all(existing) and len(set(existing)) == len(existing):
+            stem, ext = Path(target).stem, Path(target).suffix
+            for r, sfx in zip(rows, existing):
+                r["target"] = f"{stem} {sfx}{ext}"
+                r["collision"] = f"used original suffix {sfx}"
+        else:
+            stem, ext = Path(target).stem, Path(target).suffix
+            for i, r in enumerate(rows):
+                r["target"] = f"{stem} P{i:02d}{ext}"
+                r["collision"] = f"auto-suffix P{i:02d}"
+    return plan
+
+
+def render_image_renamer():
+    """Streamlit UI for the image renamer (rendered inside Tab 6)."""
+    st.subheader("🏷️ Glasses Image Renamer")
+    st.write(
+        "Rename glasses product images to match canonical names from your product list. "
+        "Source filenames use short brand codes; list entries use full brand names. "
+        "The tool maps between them and replaces `/` with `_` for Windows compatibility."
+    )
+
+    if "ren_uploader_key" not in st.session_state:
+        st.session_state["ren_uploader_key"] = 0
+
+    col_a, col_b = st.columns([1, 1])
+    with col_a:
+        uploaded_images = st.file_uploader(
+            "Upload images (.jpg / .png)",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True,
+            key=f"ren_images_{st.session_state['ren_uploader_key']}",
+        )
+        if uploaded_images:
+            if st.button("🗑️ Clear all uploaded images", use_container_width=True, key="ren_clear"):
+                st.session_state["ren_uploader_key"] += 1
+                st.rerun()
+
+    with col_b:
+        list_text = st.text_area(
+            "Product list — one per line",
+            height=200,
+            placeholder=(
+                "Marc Jacobs MJ 882/S 12J/HA\n"
+                "Hugo Boss BOSS 1880/G/S 807/IR\n"
+                "Missoni MIS 0266 ZI9\n"
+                "Tom Ford FT0926 01E"
+            ),
+            key="ren_list",
+        )
+
+    if not uploaded_images:
+        st.info("Upload one or more images above to begin.")
+        return
+    if not list_text.strip():
+        st.info("Paste a product list to continue.")
+        return
+
+    raw_lines = [ln for ln in list_text.splitlines() if ln.strip()]
+    entries = []
+    list_warnings = []
+    for ln in raw_lines:
+        parsed = parse_list_entry(ln)
+        if parsed is None:
+            list_warnings.append(ln)
+        else:
+            entries.append(parsed)
+
+    if list_warnings:
+        with st.expander(f"⚠️ {len(list_warnings)} unparseable list lines"):
+            for w in list_warnings:
+                st.write(f"`{w}`")
+
+    if not entries:
+        st.error("No valid list entries parsed. Check the format.")
+        return
+
+    plan = []
+    for f in uploaded_images:
+        result = match_filename(f.name, entries)
+        row = {"source": f.name, "status": result["status"], "_file": f}
+        if result["status"] == "matched":
+            entry = result["entry"]
+            ext = Path(f.name).suffix
+            row["target"] = target_name_for(entry, ext)
+            row["matched_entry"] = entry["raw"]
+        else:
+            row["target"] = None
+            row["matched_entry"] = None
+            row["reason"] = result
+        plan.append(row)
+
+    plan = resolve_collisions(plan)
+
+    matched_entry_raws = {row["matched_entry"] for row in plan if row["status"] == "matched"}
+    missing_entries = [e["raw"] for e in entries if e["raw"] not in matched_entry_raws]
+
+    n_total = len(plan)
+    n_matched = sum(1 for r in plan if r["status"] == "matched")
+    n_unmatched = n_total - n_matched
+    n_collisions = sum(1 for r in plan if r.get("collision"))
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total files", n_total)
+    c2.metric("Matched", n_matched)
+    c3.metric("Unmatched", n_unmatched)
+    c4.metric("Collisions resolved", n_collisions)
+
+    st.subheader("Preview")
+    matched_rows = [r for r in plan if r["status"] == "matched"]
+    if matched_rows:
+        df = pd.DataFrame([
+            {
+                "Source": r["source"],
+                "→": "→",
+                "Target": r["target"],
+                "Note": r.get("collision", ""),
+                "Already correct": r["source"] == r["target"],
+            }
+            for r in matched_rows
+        ])
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.warning("No files matched any list entry.")
+
+    unmatched_rows = [r for r in plan if r["status"] != "matched"]
+    if unmatched_rows:
+        with st.expander(f"⚠️ {len(unmatched_rows)} unmatched files"):
+            for r in unmatched_rows:
+                reason = r.get("reason", {}).get("status", "unknown")
+                detail = ""
+                if reason == "unknown_brand":
+                    detail = " (no brand code recognized)"
+                elif reason == "no_brand_in_list":
+                    detail = f" (brand {r['reason']['brand_short']} not in product list)"
+                elif reason == "no_match":
+                    detail = f" (brand {r['reason']['brand_short']} found, but no model/color match)"
+                st.write(f"`{r['source']}` — {reason}{detail}")
+
+    if missing_entries:
+        with st.expander(f"⚠️ {len(missing_entries)} list entries with no matching file"):
+            for e in missing_entries:
+                st.write(f"`{e}`")
+
+    st.divider()
+    actionable = [r for r in matched_rows if r["source"] != r["target"]]
+    if not actionable:
+        st.success("✅ All matched files already have the correct names — nothing to rename.")
+        return
+
+    st.caption(
+        f"{len(actionable)} files will be renamed. The output is a ZIP containing all "
+        "renamed images plus a `rename_log.csv` for auditing."
+    )
+
+    if st.button("📦 Build renamed ZIP", type="primary", key="ren_build"):
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for r in matched_rows:
+                file_bytes = r["_file"].getvalue()
+                zf.writestr(r["target"], file_bytes)
+            log_df = pd.DataFrame([
+                {
+                    "source": r["source"],
+                    "target": r["target"] if r["status"] == "matched" else "",
+                    "status": r["status"],
+                    "matched_entry": r.get("matched_entry") or "",
+                    "note": r.get("collision", ""),
+                }
+                for r in plan
+            ])
+            zf.writestr("rename_log.csv", log_df.to_csv(index=False))
+        zip_buf.seek(0)
+        st.download_button(
+            "⬇ Download ZIP",
+            data=zip_buf,
+            file_name="renamed_glasses.zip",
+            mime="application/zip",
+            key="ren_dl",
+        )
+        st.success(f"ZIP ready — {len(matched_rows)} files included.")
+
+# ==========================================
 # 🚀 MAIN APP EXECUTION
 # ==========================================
 
@@ -277,7 +716,7 @@ if uploaded_file:
     user_df = clean_user_file(uploaded_file)
     st.info(f"User file loaded: {len(user_df)} rows.")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Data Validation", "🖼️ Image Checker", "🧬 Syntax & Duplicates", "🎨 Color Checker", "🚫 Banned Brands"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Data Validation", "🖼️ Image Checker", "🧬 Syntax & Duplicates", "🎨 Color Checker", "🚫 Banned Brands", "🏷️ Image Renamer"])
 
     # ------------------------------------------
     # TAB 1: DATA VALIDATION
@@ -1031,3 +1470,9 @@ if uploaded_file:
             if not any_issues:
                 st.balloons()
                 st.success("✅ No banned or restricted brands found across all sites!")
+
+    # ------------------------------------------
+    # TAB 6: IMAGE RENAMER
+    # ------------------------------------------
+    with tab6:
+        render_image_renamer()
