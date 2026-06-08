@@ -478,7 +478,9 @@ def match_filename(filename, entries):
             "tokens_after_brand": after_brand,
         }
 
-    return {"status": "matched", "entry": best_match}
+    # Tokens left over after model+color were consumed — typically a photo number like "01"
+    leftover_tokens = after_brand[best_consumed:]
+    return {"status": "matched", "entry": best_match, "leftover_tokens": leftover_tokens}
 
 
 def safe_name(s):
@@ -498,6 +500,19 @@ def extract_photo_suffix(filename):
     return None
 
 
+def derive_photo_suffix(row):
+    """Best-effort photo-number suffix for a matched row.
+    Priority:
+      1. A numeric token in the leftover (e.g. "_01" after the model/color)
+      2. A trailing P-suffix in the original filename (P00, P01, ...)
+    Returns a string like 'P01' or None."""
+    for tok in (row.get("leftover_tokens") or []):
+        m = re.match(r"^(\d{1,3})$", tok)
+        if m:
+            return f"P{int(m.group(1)):02d}"
+    return extract_photo_suffix(row["source"])
+
+
 def resolve_collisions(plan):
     groups = {}
     for row in plan:
@@ -508,7 +523,7 @@ def resolve_collisions(plan):
     for target, rows in groups.items():
         if len(rows) < 2:
             continue
-        existing = [extract_photo_suffix(r["source"]) for r in rows]
+        existing = [derive_photo_suffix(r) for r in rows]
         if all(existing) and len(set(existing)) == len(existing):
             stem, ext = Path(target).stem, Path(target).suffix
             for r, sfx in zip(rows, existing):
@@ -595,6 +610,7 @@ def render_image_renamer():
             ext = Path(f.name).suffix
             row["target"] = target_name_for(entry, ext)
             row["matched_entry"] = entry["raw"]
+            row["leftover_tokens"] = result.get("leftover_tokens", [])
         else:
             row["target"] = None
             row["matched_entry"] = None
