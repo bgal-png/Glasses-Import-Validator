@@ -414,13 +414,22 @@ def match_tokens_to_entry(tokens_after_brand, entry):
 
     if not model:
         return False, 0
-    if len(tokens_after_brand) < len(model):
+
+    # A model part may itself contain a hyphen (e.g. "1335-N"). The source-filename
+    # tokenizer normalizes hyphens to spaces, so "FT1335-N" arrives as tokens
+    # ["1335", "N"]. Expand each model part on hyphens so the sub-parts match
+    # consecutive source tokens. (For hyphen-free models this is a no-op.)
+    model_subparts = []
+    for mp in model:
+        model_subparts.extend(mp.split("-"))
+
+    if len(tokens_after_brand) < len(model_subparts):
         return False, 0
 
-    for i, mp in enumerate(model):
-        if tokens_after_brand[i].upper() != mp:
+    for i, sp in enumerate(model_subparts):
+        if tokens_after_brand[i].upper() != sp:
             return False, 0
-    cursor = len(model)
+    cursor = len(model_subparts)
 
     if not color:
         return True, cursor
