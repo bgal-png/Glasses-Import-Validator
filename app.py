@@ -546,7 +546,7 @@ def resolve_collisions(plan):
     return plan
 
 
-def render_image_renamer():
+def render_image_renamer(user_df):
     """Streamlit UI for the image renamer (rendered inside Tab 6)."""
     st.subheader("🏷️ Glasses Image Renamer")
     st.write(
@@ -557,6 +557,14 @@ def render_image_renamer():
 
     if "ren_uploader_key" not in st.session_state:
         st.session_state["ren_uploader_key"] = 0
+
+    # Pull the product list from the uploaded validation file's "Glasses name" column
+    name_col = next((c for c in user_df.columns if "Glasses name" in c), user_df.columns[0])
+    file_names = (
+        user_df[name_col].dropna().astype(str).str.strip()
+        .loc[lambda s: ~s.str.lower().isin(["nan", "", "none"])]
+        .tolist()
+    )
 
     col_a, col_b = st.columns([1, 1])
     with col_a:
@@ -572,23 +580,36 @@ def render_image_renamer():
                 st.rerun()
 
     with col_b:
-        list_text = st.text_area(
-            "Product list — one per line",
-            height=200,
-            placeholder=(
-                "Marc Jacobs MJ 882/S 12J/HA\n"
-                "Hugo Boss BOSS 1880/G/S 807/IR\n"
-                "Missoni MIS 0266 ZI9\n"
-                "Tom Ford FT0926 01E"
-            ),
-            key="ren_list",
+        use_file_list = st.checkbox(
+            f"Use product list from uploaded file's `{name_col}` column ({len(file_names)} names)",
+            value=True,
+            key="ren_use_file",
         )
+        if use_file_list:
+            list_text = "\n".join(file_names)
+            with st.expander(f"📋 Preview list from file ({len(file_names)} names)"):
+                st.text("\n".join(file_names) if file_names else "(no names found)")
+        else:
+            list_text = st.text_area(
+                "Product list — one per line",
+                height=200,
+                placeholder=(
+                    "Marc Jacobs MJ 882/S 12J/HA\n"
+                    "Hugo Boss BOSS 1880/G/S 807/IR\n"
+                    "Missoni MIS 0266 ZI9\n"
+                    "Tom Ford FT0926 01E"
+                ),
+                key="ren_list",
+            )
 
     if not uploaded_images:
         st.info("Upload one or more images above to begin.")
         return
     if not list_text.strip():
-        st.info("Paste a product list to continue.")
+        if use_file_list:
+            st.warning(f"No names found in the `{name_col}` column of the uploaded file.")
+        else:
+            st.info("Paste a product list to continue.")
         return
 
     raw_lines = [ln for ln in list_text.splitlines() if ln.strip()]
@@ -1500,4 +1521,4 @@ if uploaded_file:
     # TAB 6: IMAGE RENAMER
     # ------------------------------------------
     with tab6:
-        render_image_renamer()
+        render_image_renamer(user_df)
