@@ -285,6 +285,7 @@ BRAND_MAP = {
     "MM": "Max Mara MM",
     "MO": "MAX&Co. MO",
     "FT": "Tom Ford FT",
+    "DG": "Dolce & Gabbana DG",
 }
 
 MULTI_WORD_BRANDS = {k for k in BRAND_MAP if " " in k}
