@@ -260,237 +260,79 @@ def colors_match(expected_color, detected_colors):
 # Renames glasses images to match canonical product list names.
 # ==========================================
 
-# Brand short code -> full brand name as written in the product list.
-BRAND_MAP = {
-    "BOSS": "Hugo Boss BOSS",
-    "HG": "Hugo Boss HG",
-    "MJ": "Marc Jacobs MJ",
-    "MARC": "Marc Jacobs MARC",
-    "TH": "Tommy Hilfiger TH",
-    "TJ": "Tommy Hilfiger TJ",
-    "D2": "Dsquared2 D2",
-    "ICON": "Dsquared2 ICON",
-    "DB": "David Beckham DB",
-    "IM": "Isabel Marant IM",
-    "HER": "Carolina Herrera HER",
-    "ETRO": "Etro ETRO",
-    "MIS": "Missoni MIS",
-    "MOS": "Moschino MOS",
-    "LV": "Levi's LV",
-    "PLD": "Polaroid PLD",
-    "CARRERA": "Carrera CARRERA",
-    "CA": "Carrera CA",
-    "C SPORT": "Carrera C SPORT",
-    "VICTORY": "Carrera VICTORY",
-    "MM": "Max Mara MM",
-    "MO": "MAX&Co. MO",
-    "FT": "Tom Ford FT",
-    "DG": "Dolce & Gabbana DG",
-}
+# Brand-agnostic matching: no brand map needed. We reduce both the source
+# filename and each product-list line to their pure alphanumeric "core"
+# (uppercased, separators stripped) and match when one core contains the other.
+# This handles glued codes (GU3038, FT0926), separated codes (BOSS 1880),
+# and concatenated colors (807IR vs 807/IR) without per-brand configuration.
 
-MULTI_WORD_BRANDS = {k for k in BRAND_MAP if " " in k}
-
-KIDS_LINE = {
-    "PLD": ("Polaroid Kids PLD", lambda m: m and m[0].startswith("8")),
-}
-
-PHOTO_SUFFIX_RE = re.compile(r"^P\d{1,3}$", re.IGNORECASE)
+PHOTO_SUFFIX_RE = re.compile(r"^P\d{1,3}$", re.IGNORECASE)  # P00, P01, ...
+PHOTO_NUM_RE = re.compile(r"^\d{1,2}$")                     # 1-2 digit photo index
 INVALID_FS_CHARS = set('<>:"/\\|?*')
 
 
+def list_blob(s):
+    """Reduce a string to uppercase alphanumerics only (drop spaces, /, -, &, etc.)."""
+    return re.sub(r"[^A-Z0-9]", "", s.upper())
+
+
 def parse_list_entry(line):
-    """Parse a product list line into a structured dict, or None if unparseable."""
+    """A list line is usable if it's non-empty and contains a model number (a digit).
+    Returns {'raw': line} or None. No brand parsing needed anymore."""
     line = line.strip()
-    if not line:
+    if not line or not re.search(r"\d", line):
         return None
-
-    words = line.split()
-    brand_idx = None
-    brand_short = None
-
-    for i in range(len(words) - 1):
-        pair = f"{words[i]} {words[i+1]}".upper()
-        if pair in MULTI_WORD_BRANDS:
-            brand_short = pair
-            brand_idx = i + 1
-            break
-
-    if brand_short is None:
-        candidate_range = words[:-2] if len(words) >= 3 else words
-        for i, w in enumerate(candidate_range):
-            wu = w.upper()
-            if wu in BRAND_MAP and wu not in MULTI_WORD_BRANDS:
-                brand_short = wu
-                brand_idx = i
-
-    if brand_short is None:
-        for i, w in enumerate(words):
-            wu = w.upper()
-            m = re.match(r"^([A-Z]+)(\d.*)$", wu)
-            if m and m.group(1) in BRAND_MAP:
-                brand_short = m.group(1)
-                brand_idx = i
-                break
-
-    if brand_short is None:
-        return None
-
-    full_brand_from_list = " ".join(words[: brand_idx + 1])
-
-    glued_match = re.match(r"^([A-Z]+)(\d.*)$", words[brand_idx].upper())
-    if glued_match and glued_match.group(1) == brand_short:
-        after_brand = [glued_match.group(2)] + words[brand_idx + 1:]
-    else:
-        after_brand = words[brand_idx + 1:]
-
-    if not after_brand:
-        return None
-
-    model_group = after_brand[0]
-    color_group = after_brand[1] if len(after_brand) > 1 else ""
-
-    model_parts = model_group.split("/")
-    color_parts = color_group.split("/") if color_group else []
-
-    full_brand = full_brand_from_list
-    if brand_short in KIDS_LINE:
-        kids_full, predicate = KIDS_LINE[brand_short]
-        if predicate(model_parts):
-            full_brand = kids_full
-
-    return {
-        "raw": line,
-        "brand_short": brand_short,
-        "full_brand": full_brand,
-        "model_parts": model_parts,
-        "color_parts": color_parts,
-    }
+    return {"raw": line}
 
 
 def tokenize_source(filename):
-    """Strip extension, normalize separators, split into tokens, split glued brand prefix."""
+    """Strip extension, normalize separators (_ - to space), split into tokens."""
     stem = Path(filename).stem
-    norm = re.sub(r"[_\-]+", " ", stem)
-    tokens = norm.split()
-    if not tokens:
-        return []
-
-    m = re.match(r"^([A-Za-z]+)(\d.*)$", tokens[0])
-    if m and m.group(1).upper() in BRAND_MAP:
-        tokens = [m.group(1), m.group(2)] + tokens[1:]
-
-    return tokens
+    return re.sub(r"[_\-]+", " ", stem).split()
 
 
-def strip_trailing_noise(tokens):
-    out = list(tokens)
-    while out and PHOTO_SUFFIX_RE.match(out[-1]):
-        out.pop()
-    return out
-
-
-def find_brand_in_tokens(tokens):
-    last_idx = None
-    last_brand = None
-
-    for i in range(len(tokens) - 1):
-        pair = f"{tokens[i]} {tokens[i+1]}".upper()
-        if pair in BRAND_MAP:
-            last_idx = i + 1
-            last_brand = pair
-
-    for i, t in enumerate(tokens):
-        if t.upper() in BRAND_MAP:
-            last_idx = i
-            last_brand = t.upper()
-
-    if last_brand is None:
-        return None, None
-    return last_idx, last_brand
-
-
-def match_tokens_to_entry(tokens_after_brand, entry):
-    model = [m.upper() for m in entry["model_parts"]]
-    color = [c.upper() for c in entry["color_parts"]]
-
-    if not model:
-        return False, 0
-
-    # A model part may itself contain a hyphen (e.g. "1335-N"). The source-filename
-    # tokenizer normalizes hyphens to spaces, so "FT1335-N" arrives as tokens
-    # ["1335", "N"]. Expand each model part on hyphens so the sub-parts match
-    # consecutive source tokens. (For hyphen-free models this is a no-op.)
-    model_subparts = []
-    for mp in model:
-        model_subparts.extend(mp.split("-"))
-
-    if len(tokens_after_brand) < len(model_subparts):
-        return False, 0
-
-    for i, sp in enumerate(model_subparts):
-        if tokens_after_brand[i].upper() != sp:
-            return False, 0
-    cursor = len(model_subparts)
-
-    if not color:
-        return True, cursor
-
-    if cursor >= len(tokens_after_brand):
-        return False, 0
-
-    src_color = tokens_after_brand[cursor].upper()
-    full_color_concat = "".join(color)
-
-    if src_color == full_color_concat:
-        return True, cursor + 1
-    if src_color.startswith(full_color_concat):
-        return True, cursor + 1
-    if src_color == color[0]:
-        for j, cp in enumerate(color[1:], start=1):
-            idx = cursor + j
-            if idx >= len(tokens_after_brand) or tokens_after_brand[idx].upper() != cp:
-                return False, 0
-        return True, cursor + len(color)
-    if src_color == color[0] and len(color) == 1:
-        return True, cursor + 1
-
-    return False, 0
+def is_photo_token(tok):
+    """True for trailing tokens that are photo indices (P00, 01, ...) rather than codes."""
+    return bool(PHOTO_SUFFIX_RE.match(tok) or PHOTO_NUM_RE.match(tok))
 
 
 def match_filename(filename, entries):
+    """Find the list entry whose alphanumeric core matches the filename's core.
+    Tries the full filename first; if nothing matches, strips trailing photo
+    tokens and retries. A match must contain a digit (never matches on letters
+    alone). Returns matched entry + any leftover photo tokens."""
     tokens = tokenize_source(filename)
     if not tokens:
         return {"status": "error", "reason": "Empty filename after parsing"}
 
-    tokens_clean = strip_trailing_noise(tokens)
-    brand_idx, brand_short = find_brand_in_tokens(tokens_clean)
-    if brand_short is None:
-        return {"status": "unknown_brand", "tokens": tokens_clean}
+    # Split off trailing photo-index tokens (kept for collision suffixes)
+    core = list(tokens)
+    leftover = []
+    while len(core) > 1 and is_photo_token(core[-1]):
+        leftover.insert(0, core.pop())
 
-    after_brand = tokens_clean[brand_idx + 1:]
+    # Full filename first (in case a 1-2 digit trailing token is really a sub-color),
+    # then the photo-stripped core.
+    for core_tokens, lo in [(tokens, []), (core, leftover)]:
+        f_blob = list_blob(" ".join(core_tokens))
+        if not f_blob or not re.search(r"\d", f_blob):
+            continue
 
-    candidates = [e for e in entries if e["brand_short"] == brand_short]
-    if not candidates:
-        return {"status": "no_brand_in_list", "brand_short": brand_short}
+        matches = []
+        for e in entries:
+            e_blob = list_blob(e["raw"])
+            if e_blob and (f_blob in e_blob or e_blob in f_blob):
+                matches.append((len(e_blob), e))
 
-    best_match = None
-    best_consumed = -1
-    for entry in candidates:
-        ok, consumed = match_tokens_to_entry(after_brand, entry)
-        if ok and consumed > best_consumed:
-            best_match = entry
-            best_consumed = consumed
+        if matches:
+            matches.sort(key=lambda x: x[0], reverse=True)
+            best_len = matches[0][0]
+            top = [e for ln, e in matches if ln == best_len]
+            if len(top) > 1:
+                return {"status": "ambiguous", "candidates": [e["raw"] for e in top]}
+            return {"status": "matched", "entry": top[0], "leftover_tokens": lo}
 
-    if best_match is None:
-        return {
-            "status": "no_match",
-            "brand_short": brand_short,
-            "tokens_after_brand": after_brand,
-        }
-
-    # Tokens left over after model+color were consumed — typically a photo number like "01"
-    leftover_tokens = after_brand[best_consumed:]
-    return {"status": "matched", "entry": best_match, "leftover_tokens": leftover_tokens}
+    return {"status": "no_match", "tokens": tokens}
 
 
 def safe_name(s):
@@ -687,12 +529,13 @@ def render_image_renamer(user_df):
             for r in unmatched_rows:
                 reason = r.get("reason", {}).get("status", "unknown")
                 detail = ""
-                if reason == "unknown_brand":
-                    detail = " (no brand code recognized)"
-                elif reason == "no_brand_in_list":
-                    detail = f" (brand {r['reason']['brand_short']} not in product list)"
-                elif reason == "no_match":
-                    detail = f" (brand {r['reason']['brand_short']} found, but no model/color match)"
+                if reason == "no_match":
+                    detail = " (no list entry matches this model/color code)"
+                elif reason == "ambiguous":
+                    cands = r.get("reason", {}).get("candidates", [])
+                    detail = f" (matches multiple entries: {', '.join(cands)})"
+                elif reason == "error":
+                    detail = " (could not read filename)"
                 st.write(f"`{r['source']}` — {reason}{detail}")
 
     if missing_entries:
