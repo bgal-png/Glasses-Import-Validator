@@ -277,10 +277,10 @@ def list_blob(s):
 
 
 def parse_list_entry(line):
-    """A list line is usable if it's non-empty and contains a model number (a digit).
-    Returns {'raw': line} or None. No brand parsing needed anymore."""
+    """A list line is usable if it's non-empty. Returns {'raw': line} or None.
+    No brand parsing needed — matching works on the raw text."""
     line = line.strip()
-    if not line or not re.search(r"\d", line):
+    if not line:
         return None
     return {"raw": line}
 
@@ -315,13 +315,24 @@ def match_filename(filename, entries):
     # then the photo-stripped core.
     for core_tokens, lo in [(tokens, []), (core, leftover)]:
         f_blob = list_blob(" ".join(core_tokens))
-        if not f_blob or not re.search(r"\d", f_blob):
+        if not f_blob:
             continue
+
+        # Digit-containing cores (with a model number) match by substring.
+        # Digit-less names (e.g. "Nocturna Frames Anima Black Grey") must match
+        # a list entry EXACTLY — this avoids latching onto a bare brand word.
+        has_digit = bool(re.search(r"\d", f_blob))
 
         matches = []
         for e in entries:
             e_blob = list_blob(e["raw"])
-            if e_blob and (f_blob in e_blob or e_blob in f_blob):
+            if not e_blob:
+                continue
+            if has_digit:
+                hit = f_blob in e_blob or e_blob in f_blob
+            else:
+                hit = f_blob == e_blob
+            if hit:
                 matches.append((len(e_blob), e))
 
         if matches:
