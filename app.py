@@ -1000,6 +1000,7 @@ if uploaded_file:
                 in_file_counts = Counter(clean_series.tolist())
 
                 report = []
+                duplicate_indices = []  # original df indices of duplicate rows (either kind)
 
                 for idx, name in user_df[target_user_col].dropna().astype(str).items():
                     clean_name = name.strip()
@@ -1008,9 +1009,11 @@ if uploaded_file:
                     # In-file duplicate (same name appears in more than one row)
                     if in_file_counts.get(clean_name, 0) > 1:
                         report.append({"Row": row_num, "Name": clean_name, "Issue": "🔁 IN-FILE DUPLICATE", "Details": f"Appears {in_file_counts[clean_name]}× in this file."})
+                        duplicate_indices.append(idx)
 
                     if clean_name in valid_names_set:
                         report.append({"Row": row_num, "Name": clean_name, "Issue": "❌ DUPLICATE", "Details": "Name already exists in master file."})
+                        duplicate_indices.append(idx)
                         continue
 
                     my_skel = get_skeleton(clean_name)
@@ -1029,6 +1032,24 @@ if uploaded_file:
                         return 'background-color: #fff4cc; color: black;'      # yellow — syntax
 
                     st.dataframe(res_df.style.map(_style_issue, subset=['Issue']), use_container_width=True)
+
+                    # Export duplicate rows (in-file + master) in the original file format
+                    dup_idx_unique = sorted(set(duplicate_indices))
+                    if dup_idx_unique:
+                        export_df = user_df.loc[dup_idx_unique]
+                        buf = io.BytesIO()
+                        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                            export_df.to_excel(writer, index=False)
+                        buf.seek(0)
+                        st.download_button(
+                            f"⬇ Download {len(dup_idx_unique)} duplicate rows (same format)",
+                            data=buf,
+                            file_name="duplicate_items.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="dup_export",
+                        )
+                    else:
+                        st.info("No duplicate rows to export (only suspicious-syntax issues found).")
                 else: st.balloons(); st.success("✅ Perfect! No duplicates and all syntax patterns look familiar.")
 
     # ------------------------------------------
