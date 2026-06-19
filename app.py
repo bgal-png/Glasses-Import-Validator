@@ -989,28 +989,46 @@ if uploaded_file:
             
             if st.button("🧬 Analyze Syntax & Duplicates"):
                 st.write("Analyzing patterns...")
-                
+
                 valid_names_set = set(n.strip() for n in name_master_list)
                 valid_skeletons = set(get_skeleton(n) for n in name_master_list)
-                
+
+                # Count how many times each name appears within the uploaded file itself
+                from collections import Counter
+                clean_series = user_df[target_user_col].dropna().astype(str).str.strip()
+                clean_series = clean_series[~clean_series.str.lower().isin(["nan", "", "none"])]
+                in_file_counts = Counter(clean_series.tolist())
+
                 report = []
-                
+
                 for idx, name in user_df[target_user_col].dropna().astype(str).items():
                     clean_name = name.strip()
                     row_num = idx + 2
-                    
+
+                    # In-file duplicate (same name appears in more than one row)
+                    if in_file_counts.get(clean_name, 0) > 1:
+                        report.append({"Row": row_num, "Name": clean_name, "Issue": "🔁 IN-FILE DUPLICATE", "Details": f"Appears {in_file_counts[clean_name]}× in this file."})
+
                     if clean_name in valid_names_set:
                         report.append({"Row": row_num, "Name": clean_name, "Issue": "❌ DUPLICATE", "Details": "Name already exists in master file."})
-                        continue 
-                    
+                        continue
+
                     my_skel = get_skeleton(clean_name)
                     if my_skel not in valid_skeletons:
                         report.append({"Row": row_num, "Name": clean_name, "Issue": "⚠️ SUSPICIOUS SYNTAX", "Details": f"New Pattern: {my_skel}"})
-                
+
                 if report:
                     st.error(f"Found {len(report)} Issues!")
                     res_df = pd.DataFrame(report)
-                    st.dataframe(res_df.style.map(lambda x: 'background-color: #ffcccc; color: black;' if x == "❌ DUPLICATE" else 'background-color: #fff4cc; color: black;', subset=['Issue']), use_container_width=True)
+
+                    def _style_issue(x):
+                        if x == "❌ DUPLICATE":
+                            return 'background-color: #ffcccc; color: black;'  # red — in master
+                        if x == "🔁 IN-FILE DUPLICATE":
+                            return 'background-color: #ffd9b3; color: black;'  # orange — within file
+                        return 'background-color: #fff4cc; color: black;'      # yellow — syntax
+
+                    st.dataframe(res_df.style.map(_style_issue, subset=['Issue']), use_container_width=True)
                 else: st.balloons(); st.success("✅ Perfect! No duplicates and all syntax patterns look familiar.")
 
     # ------------------------------------------
