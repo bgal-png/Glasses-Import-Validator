@@ -296,14 +296,26 @@ def is_photo_token(tok):
     return bool(PHOTO_SUFFIX_RE.match(tok) or PHOTO_NUM_RE.match(tok))
 
 
-def match_filename(filename, entries):
+def match_filename(filename, entries, barcode_map=None):
     """Find the list entry whose alphanumeric core matches the filename's core.
-    Tries the full filename first; if nothing matches, strips trailing photo
-    tokens and retries. A match must contain a digit (never matches on letters
-    alone). Returns matched entry + any leftover photo tokens."""
+    If the filename is a bare barcode (all digits, >= 8) and barcode_map is given,
+    look it up there first and rename to that product's name. Otherwise tries the
+    full filename, then strips trailing photo tokens and retries. A match must
+    contain a digit (never matches on letters alone) unless it's an exact match.
+    Returns matched entry + any leftover photo tokens."""
     tokens = tokenize_source(filename)
     if not tokens:
         return {"status": "error", "reason": "Empty filename after parsing"}
+
+    # Barcode path: the filename is just a barcode (digits only, >= 8 chars).
+    if barcode_map:
+        stem_digits = re.sub(r"\D", "", Path(filename).stem)
+        full_alnum = list_blob(" ".join(tokens))
+        if stem_digits and stem_digits == full_alnum and len(stem_digits) >= 8:
+            name = barcode_map.get(stem_digits)
+            if name:
+                return {"status": "matched", "entry": {"raw": name}, "leftover_tokens": []}
+            return {"status": "no_match", "tokens": tokens}
 
     # Split off trailing photo-index tokens (kept for collision suffixes)
     core = list(tokens)
@@ -420,6 +432,17 @@ def render_image_renamer(user_df):
         .tolist()
     )
 
+    # Build a barcode -> product name lookup (for photos named with just a barcode).
+    # Barcodes are normalized to digits only (strips trailing NBSP / whitespace).
+    barcode_col = next((c for c in user_df.columns if "barcode" in c.lower()), None)
+    barcode_map = {}
+    if barcode_col:
+        for _, brow in user_df.iterrows():
+            bc = re.sub(r"\D", "", str(brow[barcode_col]))
+            nm = str(brow[name_col]).strip()
+            if bc and nm and nm.lower() not in ("nan", "", "none"):
+                barcode_map.setdefault(bc, nm)
+
     col_a, col_b = st.columns([1, 1])
     with col_a:
         uploaded_images = st.file_uploader(
@@ -485,9 +508,12 @@ def render_image_renamer(user_df):
         st.error("No valid list entries parsed. Check the format.")
         return
 
+    if barcode_map:
+        st.caption(f"🔖 Barcode lookup ready ({len(barcode_map)} barcodes) — photos named with just a barcode will be matched too.")
+
     plan = []
     for f in uploaded_images:
-        result = match_filename(f.name, entries)
+        result = match_filename(f.name, entries, barcode_map)
         row = {"source": f.name, "status": result["status"], "_file": f}
         if result["status"] == "matched":
             entry = result["entry"]
