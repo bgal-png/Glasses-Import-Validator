@@ -299,6 +299,17 @@ def is_photo_token(tok):
     return bool(PHOTO_SUFFIX_RE.match(tok) or PHOTO_NUM_RE.match(tok))
 
 
+def code_signature(text):
+    """Concatenate the alphanumeric content of tokens that contain a digit
+    (model + color codes), dropping pure brand-name words. e.g.
+    'Dolce & Gabbana DG4477 252587' -> 'DG4477252587'."""
+    parts = []
+    for tok in text.split():
+        if re.search(r"\d", tok):
+            parts.append(re.sub(r"[^A-Z0-9]", "", tok.upper()))
+    return "".join(parts)
+
+
 def match_filename(filename, entries, barcode_map=None):
     """Find the list entry whose alphanumeric core matches the filename's core.
     If the filename is a bare barcode (all digits, >= 8) and barcode_map is given,
@@ -357,6 +368,24 @@ def match_filename(filename, entries, barcode_map=None):
             if len(top) > 1:
                 return {"status": "ambiguous", "candidates": [e["raw"] for e in top]}
             return {"status": "matched", "entry": top[0], "leftover_tokens": lo}
+
+    # PASS 2 (fallback): the entry's model+color "code signature" appears anywhere
+    # in the filename. Handles filenames with extra junk the list lacks — leading
+    # zeros, trailing variant codes, brand words missing, e.g.
+    # "0DG4477__252587_7009.jpg" vs "Dolce & Gabbana DG4477 252587".
+    f_full = list_blob(" ".join(tokens))
+    sig_matches = []
+    for e in entries:
+        sig = code_signature(e["raw"])
+        if sig and len(sig) >= 5 and sig in f_full:
+            sig_matches.append((len(sig), e))
+    if sig_matches:
+        sig_matches.sort(key=lambda x: x[0], reverse=True)
+        best_len = sig_matches[0][0]
+        top = [e for ln, e in sig_matches if ln == best_len]
+        if len(top) > 1:
+            return {"status": "ambiguous", "candidates": [e["raw"] for e in top]}
+        return {"status": "matched", "entry": top[0], "leftover_tokens": leftover}
 
     return {"status": "no_match", "tokens": tokens}
 
