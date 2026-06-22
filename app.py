@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import os
 import io
@@ -11,25 +10,11 @@ from PIL import Image
 from sklearn.cluster import KMeans
 
 # 1. Page Configuration
+# NOTE: the "Clear cache?" popup that fired on Ctrl+C is a Streamlit developer
+# shortcut (bare "c" key). It's disabled via .streamlit/config.toml
+# (client.toolbarMode = "viewer"), which hides the developer tools entirely.
 st.set_page_config(page_title="Excel Validator v2", layout="wide")
 st.title("Glasses Import Validator 😎")
-
-# Stop Ctrl+C / Cmd+C from triggering Streamlit's built-in "Clear cache?" popup,
-# so normal copy works. (Streamlit listens for the bare "c" key; we swallow it
-# only when a modifier is held, leaving the browser's copy behaviour intact.)
-components.html(
-    """
-    <script>
-    const doc = window.parent.document;
-    doc.addEventListener('keydown', function(e) {
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
-            e.stopImmediatePropagation();
-        }
-    }, true);
-    </script>
-    """,
-    height=0,
-)
 
 # ==========================================
 # 🔒 LOCKED: MAIN MASTER LOADER (Tab 1)

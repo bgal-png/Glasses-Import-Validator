@@ -1,0 +1,4 @@
+[client]
+# Hide developer tools so the built-in keyboard shortcuts (C = clear cache,
+# R = rerun) are disabled — they were firing on every Ctrl+C copy.
+toolbarMode = "viewer"
