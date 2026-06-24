@@ -817,11 +817,24 @@ if uploaded_file:
             mistakes = []
             empty_cells = []
 
+            # Type words that must be followed by a space at the start of Meta description
+            META_TYPE_PREFIXES = ["Sunglasses", "Eyeglasses"]
+
             # --- EMPTY REQUIRED FIELDS CHECK ---
             for idx, row in user_df.iterrows():
                 # Detect glasses type from Meta description
-                meta_val = str(row[meta_col]).strip().lower() if meta_col else ""
+                raw_meta = str(row[meta_col]).strip() if meta_col else ""
+                meta_val = raw_meta.lower()
                 is_sunglasses = meta_val.startswith("sunglasses")
+
+                # Meta description format: type prefix must be followed by a space
+                # (catches "SunglassesNocturna Frames..." with no space after the type)
+                for t in META_TYPE_PREFIXES:
+                    tl = t.lower()
+                    if meta_val.startswith(tl) and len(meta_val) > len(tl) and meta_val[len(tl)] != " ":
+                        mistakes.append({"Row": idx+2, "Column": meta_col, "Error": "Meta Description Format",
+                                         "Value": f"Missing space after '{t}'", "Content": raw_meta})
+                        break
 
                 # Always-required columns
                 for keyword, u_col in required_col_map.items():
