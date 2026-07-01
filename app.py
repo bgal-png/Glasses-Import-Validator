@@ -390,6 +390,61 @@ def match_filename(filename, entries, barcode_map=None):
     return {"status": "no_match", "tokens": tokens}
 
 
+def resize_centered(image_bytes, target_w=2400, target_h=1800, margin_ratio=0.05, background="auto"):
+    """Trim the background around the glasses, scale to fit target_w x target_h
+    (preserving aspect ratio), and paste centered on a target-sized PNG canvas.
+    background: 'auto' (transparent if source has alpha, else white), 'white', 'transparent'.
+    Returns PNG bytes."""
+    from PIL import ImageChops
+    img = Image.open(io.BytesIO(image_bytes))
+
+    src_has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    if background == "transparent":
+        use_alpha = True
+    elif background == "white":
+        use_alpha = False
+    else:  # auto
+        use_alpha = src_has_alpha
+
+    if src_has_alpha:
+        img = img.convert("RGBA")
+        bbox = img.split()[-1].getbbox()  # trim by alpha
+    else:
+        img = img.convert("RGB")
+        bg_ref = Image.new("RGB", img.size, (255, 255, 255))
+        diff = ImageChops.difference(img, bg_ref).convert("L")
+        mask = diff.point(lambda p: 255 if p > 15 else 0)  # ignore JPEG near-white noise
+        bbox = mask.getbbox()
+
+    if bbox:
+        img = img.crop(bbox)
+
+    # Scale to fit inside the target minus a margin, preserving aspect ratio
+    avail_w = max(1, int(target_w * (1 - 2 * margin_ratio)))
+    avail_h = max(1, int(target_h * (1 - 2 * margin_ratio)))
+    img.thumbnail((avail_w, avail_h), Image.LANCZOS)
+
+    if use_alpha:
+        canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+        src = img.convert("RGBA")
+        x = (target_w - src.width) // 2
+        y = (target_h - src.height) // 2
+        canvas.paste(src, (x, y), src)
+    else:
+        canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
+        src = img.convert("RGBA") if img.mode == "RGBA" else img.convert("RGB")
+        x = (target_w - src.width) // 2
+        y = (target_h - src.height) // 2
+        if src.mode == "RGBA":
+            canvas.paste(src, (x, y), src)  # composite over white
+        else:
+            canvas.paste(src, (x, y))
+
+    out = io.BytesIO()
+    canvas.save(out, format="PNG")
+    return out.getvalue()
+
+
 def safe_name(s):
     return "".join("_" if c in INVALID_FS_CHARS else c for c in s)
 
@@ -511,6 +566,19 @@ def render_image_renamer(user_df):
                 key="ren_list",
             )
 
+    # --- Resize options ---
+    st.markdown("**Resize & convert (optional)**")
+    ro1, ro2, ro3, ro4 = st.columns([1.2, 1, 1, 1])
+    with ro1:
+        do_resize = st.checkbox("Resize to PNG (glasses centered)", value=False, key="ren_resize")
+    with ro2:
+        target_w = st.number_input("Width (px)", min_value=100, max_value=10000, value=2400, step=100, key="ren_w", disabled=not do_resize)
+    with ro3:
+        target_h = st.number_input("Height (px)", min_value=100, max_value=10000, value=1800, step=100, key="ren_h", disabled=not do_resize)
+    with ro4:
+        bg_choice = st.selectbox("Background", ["auto", "white", "transparent"], index=0, key="ren_bg", disabled=not do_resize)
+    margin_pct = st.slider("Margin around glasses (%)", 0, 25, 5, key="ren_margin", disabled=not do_resize)
+
     if not uploaded_images:
         st.info("Upload one or more images above to begin.")
         return
@@ -549,7 +617,7 @@ def render_image_renamer(user_df):
         row = {"source": f.name, "status": result["status"], "_file": f}
         if result["status"] == "matched":
             entry = result["entry"]
-            ext = Path(f.name).suffix
+            ext = ".png" if do_resize else Path(f.name).suffix
             row["target"] = target_name_for(entry, ext)
             row["matched_entry"] = entry["raw"]
             row["leftover_tokens"] = result.get("leftover_tokens", [])
@@ -613,22 +681,39 @@ def render_image_renamer(user_df):
                 st.write(f"`{e}`")
 
     st.divider()
-    actionable = [r for r in matched_rows if r["source"] != r["target"]]
+    # When resizing, every matched file is processed (renamed AND resized/converted),
+    # even if the name already matches.
+    actionable = matched_rows if do_resize else [r for r in matched_rows if r["source"] != r["target"]]
     if not actionable:
         st.success("✅ All matched files already have the correct names — nothing to rename.")
         return
 
+    action_desc = "renamed & resized to PNG" if do_resize else "renamed"
     st.caption(
-        f"{len(actionable)} files will be renamed. The output is a ZIP containing all "
-        "renamed images plus a `rename_log.csv` for auditing."
+        f"{len(actionable)} files will be {action_desc}. The output is a ZIP containing all "
+        "processed images plus a `rename_log.csv` for auditing."
     )
 
     if st.button("📦 Build renamed ZIP", type="primary", key="ren_build"):
+        errors = []
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for r in matched_rows:
+            prog = st.progress(0.0)
+            for i, r in enumerate(matched_rows):
+                prog.progress((i + 1) / len(matched_rows))
                 file_bytes = r["_file"].getvalue()
+                if do_resize:
+                    try:
+                        file_bytes = resize_centered(
+                            file_bytes,
+                            target_w=int(target_w), target_h=int(target_h),
+                            margin_ratio=margin_pct / 100.0, background=bg_choice,
+                        )
+                    except Exception as e:
+                        errors.append({"Image": r["source"], "Error": str(e)})
+                        continue
                 zf.writestr(r["target"], file_bytes)
+            prog.empty()
             log_df = pd.DataFrame([
                 {
                     "source": r["source"],
@@ -641,6 +726,7 @@ def render_image_renamer(user_df):
             ])
             zf.writestr("rename_log.csv", log_df.to_csv(index=False))
         zip_buf.seek(0)
+        included = len(matched_rows) - len(errors)
         st.download_button(
             "⬇ Download ZIP",
             data=zip_buf,
@@ -648,7 +734,10 @@ def render_image_renamer(user_df):
             mime="application/zip",
             key="ren_dl",
         )
-        st.success(f"ZIP ready — {len(matched_rows)} files included.")
+        st.success(f"ZIP ready — {included} files included" + (f" ({len(errors)} failed to process)." if errors else "."))
+        if errors:
+            with st.expander(f"⚠️ {len(errors)} images could not be resized"):
+                st.dataframe(pd.DataFrame(errors), use_container_width=True)
 
 # ==========================================
 # 🚀 MAIN APP EXECUTION
