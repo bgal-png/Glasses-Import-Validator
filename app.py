@@ -1557,11 +1557,12 @@ if uploaded_file:
                 matrix_df = pd.DataFrame(matrix, index=sites_with_flags)
 
                 st.markdown("**🚫 = brand is banned / not allowed on that site**")
-                st.dataframe(
+                # st.table (static) instead of st.dataframe so headers don't sort
+                # on click and the brand names stay selectable/copyable.
+                st.table(
                     matrix_df.style.map(
                         lambda x: 'background-color: #ffcccc; color: black; text-align: center;' if x == "🚫" else ''
-                    ),
-                    use_container_width=True,
+                    )
                 )
 
                 if clean_sites:
