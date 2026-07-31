@@ -1524,52 +1524,48 @@ if uploaded_file:
 
             st.write(f"🏷️ Found **{len(user_brands)}** unique brands in file.")
 
-            # ---- CHECK EACH SITE ----
-            any_issues = False
+            # ---- COMPUTE FLAGGED BRANDS PER SITE ----
+            # flagged_by_site[site] = set of brands (present in file) banned / not-allowed there
+            flagged_by_site = {}
             for site, config in SITE_BANNED.items():
-                site_type = config["type"]
-                site_brands = config["brands"]
+                site_lower = {s.lower() for s in config["brands"]}
+                if config["type"] == "banned":
+                    flagged_by_site[site] = {b for b in user_brands if b.lower() in site_lower}
+                else:  # allowlist — flag brands NOT in the allowed set
+                    flagged_by_site[site] = {b for b in user_brands if b.lower() not in site_lower}
 
-                if site_type == "banned":
-                    # Case-insensitive match
-                    flagged = sorted([b for b in user_brands if b.lower() in {s.lower() for s in site_brands}])
-                    allowed_present = None
-                    label = "banned"
-                else:
-                    # Allowed list — flag brands NOT in the allowed set
-                    allowed_lower = {s.lower() for s in site_brands}
-                    flagged = sorted([b for b in user_brands if b.lower() not in allowed_lower])
-                    allowed_present = sorted([b for b in user_brands if b.lower() in allowed_lower])
-                    label = "not allowed"
+            # Brands flagged on at least one site, and sites that have at least one flag
+            flagged_brands = sorted({b for s in flagged_by_site.values() for b in s}, key=str.lower)
+            sites_with_flags = [s for s in SITE_BANNED if flagged_by_site[s]]
+            clean_sites = [s for s in SITE_BANNED if not flagged_by_site[s]]
 
-                if allowed_present is not None:
-                    # Allowlist site — combine both sections into one card
-                    header = f"⚠️ **{site}** — {len(flagged)} not allowed / {len(allowed_present)} allowed" if flagged else f"✅ **{site}** — {len(allowed_present)} allowed brand(s) present"
-                    if flagged:
-                        any_issues = True
-                    with st.expander(header, expanded=bool(flagged)):
-                        if flagged:
-                            st.markdown("**🚫 Not allowed:**")
-                            cols = st.columns(4)
-                            for i, brand in enumerate(flagged):
-                                cols[i % 4].error(brand)
-                            st.divider()
-                        st.markdown("**✅ Allowed:**")
-                        cols = st.columns(4)
-                        for i, brand in enumerate(allowed_present):
-                            cols[i % 4].success(brand)
-                elif flagged:
-                    any_issues = True
-                    with st.expander(f"⚠️ **{site}** — {len(flagged)} brand(s) {label}", expanded=True):
-                        cols = st.columns(4)
-                        for i, brand in enumerate(flagged):
-                            cols[i % 4].error(brand)
-                else:
-                    st.success(f"✅ **{site}** — No issues")
+            total_flags = sum(len(v) for v in flagged_by_site.values())
 
-            if not any_issues:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Brands flagged", len(flagged_brands))
+            c2.metric("Sites affected", len(sites_with_flags))
+            c3.metric("Total brand×site blocks", total_flags)
+
+            if not flagged_brands:
                 st.balloons()
                 st.success("✅ No banned or restricted brands found across all sites!")
+            else:
+                # ---- COMPACT MATRIX: brand (rows) × site (cols), 🚫 where blocked ----
+                matrix = {}
+                for site in sites_with_flags:
+                    matrix[site] = ["🚫" if b in flagged_by_site[site] else "" for b in flagged_brands]
+                matrix_df = pd.DataFrame(matrix, index=flagged_brands)
+
+                st.markdown("**🚫 = brand is banned / not allowed on that site**")
+                st.dataframe(
+                    matrix_df.style.map(
+                        lambda x: 'background-color: #ffcccc; color: black; text-align: center;' if x == "🚫" else ''
+                    ),
+                    use_container_width=True,
+                )
+
+                if clean_sites:
+                    st.caption("✅ No issues on: " + ", ".join(clean_sites))
 
     # ------------------------------------------
     # TAB 6: IMAGE RENAMER
