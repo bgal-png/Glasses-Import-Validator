@@ -1550,11 +1550,11 @@ if uploaded_file:
                 st.balloons()
                 st.success("✅ No banned or restricted brands found across all sites!")
             else:
-                # ---- COMPACT MATRIX: brand (rows) × site (cols), 🚫 where blocked ----
+                # ---- COMPACT MATRIX: site (rows) × brand (cols), 🚫 where blocked ----
                 matrix = {}
-                for site in sites_with_flags:
-                    matrix[site] = ["🚫" if b in flagged_by_site[site] else "" for b in flagged_brands]
-                matrix_df = pd.DataFrame(matrix, index=flagged_brands)
+                for brand in flagged_brands:
+                    matrix[brand] = ["🚫" if brand in flagged_by_site[site] else "" for site in sites_with_flags]
+                matrix_df = pd.DataFrame(matrix, index=sites_with_flags)
 
                 st.markdown("**🚫 = brand is banned / not allowed on that site**")
                 st.dataframe(
