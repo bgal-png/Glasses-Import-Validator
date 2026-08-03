@@ -419,10 +419,15 @@ def resize_centered(image_bytes, target_w=2400, target_h=1800, margin_ratio=0.05
     if bbox:
         img = img.crop(bbox)
 
-    # Scale to fit inside the target minus a margin, preserving aspect ratio
+    # Scale the glasses to FILL the target minus a margin, preserving aspect
+    # ratio. Uses an explicit resize (not thumbnail) so small images are
+    # enlarged too — otherwise the margin has no effect on already-small photos.
     avail_w = max(1, int(target_w * (1 - 2 * margin_ratio)))
     avail_h = max(1, int(target_h * (1 - 2 * margin_ratio)))
-    img.thumbnail((avail_w, avail_h), Image.LANCZOS)
+    w, h = img.size
+    if w and h:
+        scale = min(avail_w / w, avail_h / h)  # contain; allows upscaling
+        img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
 
     if use_alpha:
         canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
